@@ -7,8 +7,8 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
-  LOG_DIR: z.string().default('/guolei/new-api/logs'),
-  LOG_PATTERN: z.string().default('oneapi-*.log'),
+  LOG_DIR: z.string().default('/logs'),
+  LOG_PATTERN: z.string().default('*.log'),
 
   // Auth: comma-separated API keys. Empty = auth disabled.
   API_KEYS: z.string().default(''),

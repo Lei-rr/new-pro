@@ -56,10 +56,10 @@ onBeforeUnmount(() => ws.disconnect());
         </div>
         <div class="hidden flex-col md:flex">
           <span class="text-base font-bold tracking-tight text-slate-800 dark:text-slate-100 leading-tight">
-            NewAPI
+            new-pro
           </span>
           <span class="text-xs font-semibold text-slate-400 dark:text-slate-500 tracking-wider uppercase">
-            Analytics
+            Log Analytics
           </span>
         </div>
       </div>

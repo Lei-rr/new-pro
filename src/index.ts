@@ -18,7 +18,7 @@ async function bootstrap(): Promise<void> {
   const env = getEnv();
   const log = logger;
 
-  log.info({ env: env.NODE_ENV, port: env.PORT }, 'Starting NewAPI Analytics');
+  log.info({ env: env.NODE_ENV, port: env.PORT }, 'Starting new-pro');
 
   // ─── Core ───
   const bus = EventBus.getInstance();

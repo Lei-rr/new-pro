@@ -1,22 +1,13 @@
 services:
-  analytics:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: newapi-analytics:latest
-    container_name: newapi-analytics
+  new-pro:
+    build: .
+    image: new-pro:latest
+    container_name: new-pro
     restart: unless-stopped
     ports:
       - "${PORT:-3600}:3600"
     environment:
-      - PORT=3600
-      - HOST=0.0.0.0
-      - NODE_ENV=production
-      - LOG_DIR=/logs
-      - LOG_PATTERN=${LOG_PATTERN:-oneapi-*.log}
       - API_KEYS=${API_KEYS:-}
-      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
-      # 宿主机日志目录映射到容器内 /logs（只读安全挂载）
-      # 可通过 .env 中的 LOG_PATH 自定义本地日志路径
+      # 直接将宿主机 NewAPI 日志目录挂载至容器 /logs（只读安全挂载）
       - "${LOG_PATH:-/guolei/new-api/logs}:/logs:ro"
