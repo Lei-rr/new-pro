@@ -1,5 +1,5 @@
 # ── Stage 1: Build Frontend ──
-FROM node:20-alpine AS web-builder
+FROM node:22-alpine AS web-builder
 RUN corepack enable && corepack prepare pnpm@11 --activate
 WORKDIR /web
 COPY web/package.json web/pnpm-lock.yaml ./
@@ -8,7 +8,7 @@ COPY web/ ./
 RUN pnpm run build
 
 # ── Stage 2: Build Backend Server ──
-FROM node:20-alpine AS server-builder
+FROM node:22-alpine AS server-builder
 RUN corepack enable && corepack prepare pnpm@11 --activate
 WORKDIR /app
 COPY package.json pnpm-lock.yaml ./
@@ -18,7 +18,7 @@ COPY src/ src/
 RUN pnpm run build
 
 # ── Stage 3: Production Runner ──
-FROM node:20-alpine AS runner
+FROM node:22-alpine AS runner
 RUN corepack enable && corepack prepare pnpm@11 --activate
 WORKDIR /app
 ENV NODE_ENV=production

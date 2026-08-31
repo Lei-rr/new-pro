@@ -15,7 +15,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install pnpm
         uses: pnpm/action-setup@v3
@@ -25,32 +25,23 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
-      - name: Type check & Lint
+      - name: Type check & Lint (Backend)
         run: pnpm run lint
 
-      - name: Test
+      - name: Run Tests (Backend)
         run: pnpm test
 
-      - name: Build
+      - name: Build Backend
         run: pnpm run build
 
       - name: Install web dependencies
         run: pnpm install --ignore-workspace
         working-directory: web
 
-      - name: Type check web
+      - name: Type check (Frontend)
         run: pnpm run typecheck
         working-directory: web
 
-      - name: Build web
+      - name: Build Frontend
         run: pnpm run build
         working-directory: web
-
-  # build-docker:
-  #   needs: build-and-test
-  #   runs-on: ubuntu-latest
-  #   if: github.ref == 'refs/heads/main'
-  #   steps:
-  #     - uses: actions/checkout@v4
-  #     - name: Build Docker image
-  #       run: docker build -t newapi-analytics:latest .
