@@ -1,0 +1,180 @@
+import { describe, expect, it } from 'vitest';
+import { MemoryStore } from './memory.js';
+import type { ConsumeLogEntry, GinLogEntry, ErrorLogEntry } from '../types/log.js';
+
+function consume(opts: {
+  requestId?: string;
+  userId?: number;
+  timestamp?: Date;
+  model?: string;
+  quota?: number;
+  tokenName?: string;
+} = {}): ConsumeLogEntry {
+  return {
+    level: 'INFO',
+    kind: 'consume',
+    timestamp: opts.timestamp ?? new Date('2026-08-27 09:11:47'),
+    requestId: opts.requestId ?? 'req-1',
+    userId: opts.userId ?? 42,
+    params: {
+      channel_id: 1,
+      prompt_tokens: 100,
+      completion_tokens: 50,
+      model_name: opts.model ?? 'gpt-4',
+      token_name: opts.tokenName ?? 'tk-1',
+      quota: opts.quota ?? 150_000,
+      content: '',
+      token_id: 1,
+      use_time_seconds: 1.5,
+      is_stream: false,
+      group: 'default',
+      other: { frt: 200, cache_tokens: 10 },
+    },
+    sourceFile: 'f.log',
+  };
+}
+
+function gin(opts: {
+  requestId?: string;
+  ip?: string;
+  statusCode?: number;
+  timestamp?: Date;
+  durationMs?: number;
+} = {}): GinLogEntry {
+  return {
+    level: 'GIN',
+    timestamp: opts.timestamp ?? new Date('2026-08-27 09:11:46'),
+    routeType: 'relay',
+    requestId: opts.requestId ?? 'req-1',
+    statusCode: opts.statusCode ?? 200,
+    duration: '1.2s',
+    durationMs: opts.durationMs ?? 1200,
+    ip: opts.ip ?? '1.2.3.4',
+    method: 'POST',
+    path: '/v1/chat/completions',
+    sourceFile: 'f.log',
+  };
+}
+
+function error(timestamp?: Date): ErrorLogEntry {
+  return {
+    level: 'ERR',
+    timestamp: timestamp ?? new Date('2026-08-27 09:12:00'),
+    requestId: 'req-e',
+    message: 'boom',
+    sourceFile: 'f.log',
+  };
+}
+
+describe('MemoryStore', () => {
+  it('accumulates summary counters monotonically and accurately', () => {
+    const store = new MemoryStore();
+    store.append(gin({ requestId: 'req-1' }));
+    store.append(consume({ requestId: 'req-1', quota: 150_000 }));
+    store.append(gin({ requestId: 'req-2' }));
+    store.append(consume({ requestId: 'req-2', quota: 350_000, userId: 7, model: 'gpt-3.5' }));
+
+    const s = store.getSummary();
+    expect(s.totalRequests).toBe(2);
+    expect(s.billingRequests).toBe(2);
+    expect(s.totalQuota).toBe(500_000);
+    expect(s.totalCost).toBe(1);
+    expect(s.totalPromptTokens).toBe(200);
+    expect(s.activeModels).toBe(2);
+    expect(s.activeUsers).toBe(2);
+  });
+
+  it('computes errorRate from GIN status >= 400 over total HTTP requests', () => {
+    const store = new MemoryStore();
+    store.append(gin({ requestId: 'req-1', statusCode: 200 }));
+    store.append(gin({ requestId: 'req-2', statusCode: 500 }));
+    store.append(consume({ requestId: 'req-1' }));
+    store.append(error()); // ERR log recorded as diagnostic line
+
+    const s = store.getSummary();
+    expect(s.totalRequests).toBe(2);
+    expect(s.errorCount).toBe(1);
+    expect(s.errorLogCount).toBe(1);
+    expect(s.errorRate).toBe(0.5);
+  });
+
+  it('builds hourly timeline buckets with HTTP requests and errors', () => {
+    const store = new MemoryStore();
+    const t1 = new Date(Date.now() - 2 * 3600_000);
+    const t2 = new Date(Date.now() - 3600_000);
+
+    store.append(gin({ timestamp: t1, requestId: 'r1' }));
+    store.append(consume({ timestamp: t1, requestId: 'r1' }));
+    store.append(gin({ timestamp: t2, requestId: 'r2', statusCode: 500 }));
+    store.append(consume({ timestamp: t2, requestId: 'r2' }));
+
+    const timeline = store.getTimeline(24);
+    expect(timeline).toHaveLength(2);
+    expect(timeline[0].requests).toBe(1);
+    expect(timeline[0].quota).toBe(150_000);
+    expect(timeline[1].errors).toBe(1);
+  });
+
+  it('returns dimension stats with pagination', () => {
+    const store = new MemoryStore();
+    store.append(consume({ requestId: 'a' }));
+    store.append(consume({ requestId: 'b', userId: 8 }));
+    store.append(consume({ requestId: 'c', userId: 9 }));
+
+    const res = store.getDimensionStats('model', { sort: 'requests', limit: 2, offset: 0 });
+    expect(res.total).toBe(1);
+    expect(res.data[0].key).toBe('gpt-4');
+    expect(res.data[0].requests).toBe(3);
+  });
+
+  it('bidirectionally correlates GIN relay IP to consume entries for IP dimension stats', () => {
+    const store = new MemoryStore();
+    // Consume arrives before GIN (standard Go middleware flow)
+    store.append(consume({ requestId: 'req-1', quota: 100_000 }));
+    store.append(gin({ requestId: 'req-1', ip: '1.2.3.4' }));
+
+    // GIN arrives before consume
+    store.append(gin({ requestId: 'req-2', ip: '5.6.7.8' }));
+    store.append(consume({ requestId: 'req-2', quota: 200_000, model: 'gpt-3.5' }));
+
+    const byIp = store.searchLogs({ ip: '1.2.3.4' });
+    expect(byIp.total).toBe(1);
+    expect(byIp.data[0].requestId).toBe('req-1');
+
+    const ips = store.getDimensionStats('ip');
+    expect(ips.total).toBe(2);
+    const ip1 = ips.data.find((d) => d.key === '1.2.3.4');
+    expect(ip1).toBeDefined();
+    expect(ip1!.quota).toBe(100_000);
+    expect(ip1!.cost).toBe(0.2);
+  });
+
+  it('searches logs with offset and limit pagination', () => {
+    const store = new MemoryStore();
+    store.append(consume({ requestId: 'r1', model: 'gpt-4' }));
+    store.append(consume({ requestId: 'r2', model: 'gpt-4' }));
+    store.append(consume({ requestId: 'r3', model: 'gpt-3.5' }));
+
+    const page1 = store.searchLogs({ model: 'gpt-4', limit: 1, offset: 0 });
+    expect(page1.total).toBe(2);
+    expect(page1.data).toHaveLength(1);
+    expect(page1.data[0].requestId).toBe('r2');
+
+    const page2 = store.searchLogs({ model: 'gpt-4', limit: 1, offset: 1 });
+    expect(page2.total).toBe(2);
+    expect(page2.data).toHaveLength(1);
+    expect(page2.data[0].requestId).toBe('r1');
+  });
+
+  it('builds daily cost trend in ascending order', () => {
+    const store = new MemoryStore();
+    store.append(consume({ timestamp: new Date('2026-08-27 09:00:00') }));
+    store.append(consume({ requestId: 'req-2', timestamp: new Date('2026-08-28 09:00:00') }));
+
+    const trend = store.getCostTrend(7);
+    expect(trend).toHaveLength(2);
+    expect(trend[0].date).toBe('2026-08-27');
+    expect(trend[1].date).toBe('2026-08-28');
+    expect(trend[1].cost).toBe(0.3);
+  });
+});
