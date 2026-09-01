@@ -25,15 +25,14 @@ function onRangeChange(value: string): void {
     </div>
 
     <!-- WS 状态 -->
-    <Tooltip :content="realtime.connected ? '实时连接正常' : '实时连接断开，重连中'">
-      <span
-        class="flex size-6 items-center justify-center rounded-md"
-        :class="realtime.connected ? 'text-emerald-500' : 'text-muted-foreground'"
-      >
-        <Wifi v-if="realtime.connected" class="size-4" />
-        <WifiOff v-else class="size-4" />
-      </span>
-    </Tooltip>
+    <span
+      class="flex size-6 items-center justify-center rounded-md"
+      :class="realtime.connected ? 'text-emerald-500' : 'text-muted-foreground'"
+      :title="realtime.connected ? '实时连接正常' : '实时连接断开，重连中'"
+    >
+      <Wifi v-if="realtime.connected" class="size-4" />
+      <WifiOff v-else class="size-4" />
+    </span>
 
     <!-- 全局时间范围 -->
     <Select :model-value="String(app.rangeHours)" @update:model-value="onRangeChange">
