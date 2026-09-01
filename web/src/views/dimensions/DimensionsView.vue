@@ -83,72 +83,73 @@ const barChart = computed<EChartsCoreOption>(() => ({
       </TabsList>
     </Tabs>
 
-    <!-- 排序 + Top 图 -->
-    <div class="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <Card class="gap-4 p-4">
-        <div class="flex items-center justify-between">
+    <!-- Top 10 分布（上） -->
+    <Card class="gap-4 p-4">
+      <div class="flex items-center justify-between">
+        <div>
           <h2 class="text-sm font-semibold">Top 10 分布</h2>
-          <Select :model-value="store.sort" @update:model-value="(v: unknown) => store.setSort((v as DimensionSort) ?? 'requests')">
-            <SelectTrigger class="h-8 w-28 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem v-for="s in SORTS" :key="s.value" :value="s.value">{{ s.label }}</SelectItem>
-            </SelectContent>
-          </Select>
+          <p class="text-[11px] text-muted-foreground">按 {{ SORTS.find((s) => s.value === store.sort)?.label ?? '请求数' }} 排序</p>
         </div>
-        <BaseChart :option="barChart" height="320px" />
-      </Card>
+        <Select :model-value="store.sort" @update:model-value="(v: unknown) => store.setSort((v as DimensionSort) ?? 'requests')">
+          <SelectTrigger class="h-8 w-28 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem v-for="s in SORTS" :key="s.value" :value="s.value">{{ s.label }}</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      <BaseChart :option="barChart" height="340px" />
+    </Card>
 
-      <!-- 明细表 -->
-      <Card class="p-0">
-        <div class="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow class="hover:bg-transparent">
-                <TableHead class="text-xs">名称</TableHead>
-                <TableHead class="text-right text-xs">请求</TableHead>
-                <TableHead class="text-right text-xs">Tokens</TableHead>
-                <TableHead class="text-right text-xs">成本</TableHead>
-                <TableHead class="text-right text-xs">错误</TableHead>
-                <TableHead class="text-right text-xs">FRT</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="d in store.data?.data ?? []" :key="d.key">
-                <TableCell class="max-w-48 truncate text-xs font-medium">
-                  <span class="flex flex-col">
-                    {{ d.key }}
-                    <span v-if="d.location" class="text-[10px] font-normal text-muted-foreground">{{ d.location }}</span>
-                  </span>
-                </TableCell>
-                <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.requests) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.totalTokens) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums">{{ formatCost(d.cost) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.errors) }}</TableCell>
-                <TableCell class="text-right text-xs tabular-nums">{{ d.avgFrt ? `${d.avgFrt.toFixed(0)}ms` : '—' }}</TableCell>
-              </TableRow>
-              <TableRow v-if="!store.loading && !(store.data?.data ?? []).length">
-                <TableCell colspan="6" class="py-10 text-center text-xs text-muted-foreground">暂无数据</TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </div>
+    <!-- 明细表（下） -->
+    <Card class="p-0">
+      <div class="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow class="hover:bg-transparent">
+              <TableHead class="text-xs">名称</TableHead>
+              <TableHead class="text-right text-xs">请求</TableHead>
+              <TableHead class="text-right text-xs">Tokens</TableHead>
+              <TableHead class="text-right text-xs">成本</TableHead>
+              <TableHead class="text-right text-xs">错误</TableHead>
+              <TableHead class="text-right text-xs">FRT</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="d in store.data?.data ?? []" :key="d.key">
+              <TableCell class="max-w-48 truncate text-xs font-medium">
+                <span class="flex flex-col">
+                  {{ d.key }}
+                  <span v-if="d.location" class="text-[10px] font-normal text-muted-foreground">{{ d.location }}</span>
+                </span>
+              </TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.requests) }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.totalTokens) }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ formatCost(d.cost) }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.errors) }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ d.avgFrt ? `${d.avgFrt.toFixed(0)}ms` : '—' }}</TableCell>
+            </TableRow>
+            <TableRow v-if="!store.loading && !(store.data?.data ?? []).length">
+              <TableCell colspan="6" class="py-10 text-center text-xs text-muted-foreground">暂无数据</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </div>
 
-        <div class="flex items-center justify-between border-t border-border px-4 py-3">
-          <p class="text-[11px] text-muted-foreground tabular-nums">
-            共 {{ formatNumber(store.data?.total) }} 项 · {{ currentPage }}/{{ totalPages }} 页
-          </p>
-          <div class="flex items-center gap-1">
-            <Button variant="outline" size="icon-xs" :disabled="currentPage <= 1" @click="store.goTo(currentPage - 1)">
-              <ChevronLeft class="size-3.5" />
-            </Button>
-            <Button variant="outline" size="icon-xs" :disabled="currentPage >= totalPages" @click="store.goTo(currentPage + 1)">
-              <ChevronRight class="size-3.5" />
-            </Button>
-          </div>
+      <div class="flex items-center justify-between border-t border-border px-4 py-3">
+        <p class="text-[11px] text-muted-foreground tabular-nums">
+          共 {{ formatNumber(store.data?.total) }} 项 · {{ currentPage }}/{{ totalPages }} 页
+        </p>
+        <div class="flex items-center gap-1">
+          <Button variant="outline" size="icon-xs" :disabled="currentPage <= 1" @click="store.goTo(currentPage - 1)">
+            <ChevronLeft class="size-3.5" />
+          </Button>
+          <Button variant="outline" size="icon-xs" :disabled="currentPage >= totalPages" @click="store.goTo(currentPage + 1)">
+            <ChevronRight class="size-3.5" />
+          </Button>
         </div>
-      </Card>
-    </div>
+      </div>
+    </Card>
   </div>
 </template>
