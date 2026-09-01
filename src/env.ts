@@ -36,10 +36,6 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(600),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
 
-  // Ingest resume checkpoint (file offsets persisted across restarts)
-  CHECKPOINT_PATH: z.string().default('./data/checkpoint.json'),
-  CHECKPOINT_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
-
   MAX_ENTRIES: z.coerce.number().default(500_000),
   RETENTION_HOURS: z.coerce.number().default(72),
 

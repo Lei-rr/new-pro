@@ -1,28 +1,72 @@
 import { z } from 'zod';
 import type { ApiApp } from '../app-type.js';
 import type { IStore } from '../../store/interface.js';
-import type { ConsumeLogEntry } from '../../types/log.js';
-import { isConsume } from '../../types/log.js';
+import type { ConsumeLogEntry, ParsedLogEntry } from '../../types/log.js';
+import { isConsume, isError, isGin } from '../../types/log.js';
 import { QUOTA_PER_COST_UNIT } from '../../constants.js';
 import { getIpLocation } from '../../utils/geo.js';
 
 const num = z.string().regex(/^\d+$/).transform(Number);
 const epochMs = z.string().regex(/^\d+$/).transform(Number);
 
-const paginationQuery = z.object({
+
+const streamQuery = z.object({
+  kind: z.enum(['all', 'consume', 'gin', 'error', 'success', 'failure']).optional(),
+  q: z.string().optional(),
+  start: epochMs.optional(),
+  end: epochMs.optional(),
   limit: num.optional(),
   offset: num.optional(),
 });
 
-const searchQuery = paginationQuery.extend({
-  q: z.string().optional(),
-  model: z.string().optional(),
-  user: z.string().optional(),
-  channel: z.string().optional(),
-  ip: z.string().optional(),
-  start: epochMs.optional(),
-  end: epochMs.optional(),
-});
+/** 原始日志行（保持原样输出，仅按状态/等级分类） */
+function formatRawLog(e: ParsedLogEntry) {
+  const base = {
+    timestamp: e.timestamp.getTime(),
+    requestId: 'requestId' in e ? e.requestId : null,
+    sourceFile: e.sourceFile,
+  };
+
+  if (isConsume(e)) {
+    return {
+      ...base,
+      level: 'INFO' as const,
+      kind: 'consume' as const,
+      success: true,
+      message: `消耗记录 userId=${e.userId} model=${e.params.model_name} tokens=${e.params.prompt_tokens}+${e.params.completion_tokens} quota=${e.params.quota}`,
+      detail: formatConsume(e),
+    };
+  }
+  if (isGin(e)) {
+    return {
+      ...base,
+      level: 'GIN' as const,
+      kind: 'gin' as const,
+      success: e.statusCode < 400,
+      statusCode: e.statusCode,
+      message: `${e.method} ${e.path} -> ${e.statusCode} (${e.duration})`,
+      detail: { ip: e.ip, routeType: e.routeType },
+    };
+  }
+  if (isError(e)) {
+    return {
+      ...base,
+      level: 'ERR' as const,
+      kind: 'error' as const,
+      success: false,
+      message: e.message,
+      detail: null,
+    };
+  }
+  return {
+    ...base,
+    level: e.level,
+    kind: e.level === 'SYS' ? 'sys' : 'info',
+    success: true,
+    message: e.message,
+    detail: null,
+  };
+}
 
 /** Flatten a consume entry for API response */
 function formatConsume(e: ConsumeLogEntry) {
@@ -63,30 +107,15 @@ function formatConsume(e: ConsumeLogEntry) {
 }
 
 export function registerLogRoutes(app: ApiApp, store: IStore): void {
-  app.get('/logs/recent', { schema: { querystring: paginationQuery } }, async (request) => {
-    const limit = Math.min(Math.max(1, request.query.limit ?? 50), 500);
-    const offset = Math.max(0, request.query.offset ?? 0);
-    const res = store.getRecentConsumeLogs(limit, offset);
-    return {
-      total: res.total,
-      count: res.data.length,
-      offset,
-      limit,
-      data: res.data.filter(isConsume).map(formatConsume),
-    };
-  });
-
-  app.get('/logs/search', { schema: { querystring: searchQuery } }, async (request) => {
+  // 原始日志流（全量，不去重；按等级/成功失败筛选）
+  app.get('/logs/stream', { schema: { querystring: streamQuery } }, async (request) => {
     const q = request.query;
     const limit = Math.min(Math.max(1, q.limit ?? 50), 500);
     const offset = Math.max(0, q.offset ?? 0);
 
-    const res = store.searchLogs({
+    const res = store.getRawLogs({
+      kind: q.kind ?? 'all',
       q: q.q,
-      model: q.model,
-      user: q.user,
-      channel: q.channel,
-      ip: q.ip,
       start: q.start,
       end: q.end,
       limit,
@@ -97,7 +126,7 @@ export function registerLogRoutes(app: ApiApp, store: IStore): void {
       count: res.data.length,
       offset,
       limit,
-      data: res.data.filter(isConsume).map(formatConsume),
+      data: res.data.map(formatRawLog),
     };
   });
 

@@ -174,6 +174,8 @@ export interface DashboardResponse {
   topModels: DimensionStats[];
   topChannels: DimensionStats[];
   topUsers: DimensionStats[];
+  channelHealth: Array<{ key: string; requests: number; errors: number; errorRate: number }>;
+  alerts: Alert[];
 }
 
 export interface CostAnalyticsResponse {
@@ -199,6 +201,30 @@ export interface LogFacetsResponse {
   users: LogFacet[];
 }
 
+// ─── 原始日志流 ───
+
+export type RawLogKind = 'all' | 'consume' | 'gin' | 'error' | 'success' | 'failure';
+
+export interface RawLogEntry {
+  timestamp: number;
+  requestId: string | null;
+  sourceFile: string;
+  level: 'SYS' | 'GIN' | 'INFO' | 'ERR';
+  kind: 'consume' | 'gin' | 'error' | 'sys' | 'info';
+  success: boolean;
+  statusCode?: number;
+  message: string;
+  detail: Record<string, unknown> | null;
+}
+
+export interface RawLogResponse {
+  total: number;
+  count: number;
+  offset: number;
+  limit: number;
+  data: RawLogEntry[];
+}
+
 // ─── WS 消息 ───
 
 export interface WsSnapshot {
@@ -220,7 +246,7 @@ export interface WsStatsUpdate {
 
 export interface WsNewLogs {
   type: 'new_logs';
-  data: LogEntry[];
+  data: RawLogEntry[];
 }
 
 export interface WsAlert {

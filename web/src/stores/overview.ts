@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/api';
-import type { DimensionStats, OverviewSummary, TimelineBucket } from '@/api/types';
+import type { Alert, DimensionStats, OverviewSummary, TimelineBucket } from '@/api/types';
 import { useAppStore } from './app';
 
 /** 总览数据：单次聚合请求（/dashboard） + WS 实时刷新 */
@@ -12,6 +12,8 @@ export const useOverviewStore = defineStore('overview', () => {
   const topModels = ref<DimensionStats[]>([]);
   const topChannels = ref<DimensionStats[]>([]);
   const topUsers = ref<DimensionStats[]>([]);
+  const channelHealth = ref<Array<{ key: string; requests: number; errors: number; errorRate: number }>>([]);
+  const alerts = ref<Alert[]>([]);
   const loading = ref(false);
   const windowMs = ref(24 * 3_600_000);
 
@@ -27,6 +29,8 @@ export const useOverviewStore = defineStore('overview', () => {
       topModels.value = res.topModels;
       topChannels.value = res.topChannels;
       topUsers.value = res.topUsers;
+      channelHealth.value = res.channelHealth;
+      alerts.value = res.alerts;
       windowMs.value = hours * 3_600_000;
     } finally {
       loading.value = false;
@@ -41,5 +45,8 @@ export const useOverviewStore = defineStore('overview', () => {
     return (cur - prev) / prev;
   }
 
-  return { summary, prevSummary, timeline, topModels, topChannels, topUsers, loading, windowMs, load, delta };
+  return {
+    summary, prevSummary, timeline, topModels, topChannels, topUsers,
+    channelHealth, alerts, loading, windowMs, load, delta,
+  };
 });

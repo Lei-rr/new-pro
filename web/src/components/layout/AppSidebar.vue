@@ -12,7 +12,7 @@ defineEmits<{ navigate: [] }>();
         <Activity class="size-4" />
       </div>
       <div class="leading-tight">
-        <p class="text-sm font-semibold tracking-tight">new-pro</p>
+        <p class="text-sm font-semibold tracking-tight">New-Pro</p>
         <p class="text-[11px] text-muted-foreground">Log Analytics</p>
       </div>
     </div>

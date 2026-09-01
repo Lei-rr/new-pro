@@ -5,7 +5,7 @@ import type { ParsedLogEntry, ConsumeLogEntry, GinLogEntry, ErrorLogEntry } from
 import { isConsume, isGin, isError } from '../types/log.js';
 import { QUOTA_PER_COST_UNIT } from '../constants.js';
 import { hourKeyToEpochMs, toDateString, toHourKey } from '../utils/time.js';
-import type { IStore, LogSearchFilter } from './interface.js';
+import type { IStore, LogSearchFilter, RawLogFilter } from './interface.js';
 import type { DimensionType, DimensionQuery, DimensionStats, TimelineBucket, OverviewSummary, CostTrendPoint } from '../types/stats.js';
 import { DimensionIndex } from './indexes.js';
 import { newBucket, type HourBucket } from './buckets.js';
@@ -13,6 +13,9 @@ import { RequestCorrelator } from './correlation.js';
 import { ReplayGuard } from './dedup.js';
 
 const log = createLogger('store');
+
+/** Raw log viewer ring buffer capacity. */
+const RAW_LOG_BUFFER_MAX = 200_000;
 
 /**
  * In-memory store with multi-dimension indexes and bidirectional IP correlation.
@@ -28,6 +31,9 @@ export class MemoryStore implements IStore, Lifecycle {
   private consumeEntries: ConsumeLogEntry[] = [];
   private ginEntries: GinLogEntry[] = [];
   private errorEntries: ErrorLogEntry[] = [];
+
+  /** Raw stream of every parsed line (bounded ring buffer, for the viewer). */
+  private rawLogs: ParsedLogEntry[] = [];
 
   // Dimension indexes (single generic class for all)
   private indexes: Record<DimensionType, DimensionIndex> = {
@@ -94,6 +100,13 @@ export class MemoryStore implements IStore, Lifecycle {
     // Replay guard: skip entries already ingested (file re-reads after
     // rotation/truncation would otherwise double all counters).
     if (this.replayGuard.checkAndRemember(entry)) return;
+
+    // Raw stream: keep every parsed line (GIN/consume/ERR/INFO/SYS) in
+    // ingestion order for the log viewer. Bounded ring buffer.
+    this.rawLogs.push(entry);
+    if (this.rawLogs.length > RAW_LOG_BUFFER_MAX) {
+      this.rawLogs.splice(0, this.rawLogs.length - RAW_LOG_BUFFER_MAX);
+    }
 
     this.trackTime(entry);
 
@@ -473,6 +486,60 @@ export class MemoryStore implements IStore, Lifecycle {
       total,
       data: this.consumeEntries.slice(start, end).reverse(),
     };
+  }
+
+  getRawLogs(filter: RawLogFilter): { total: number; data: ParsedLogEntry[] } {
+    const limit = filter.limit ?? 50;
+    const offset = filter.offset ?? 0;
+    const results: ParsedLogEntry[] = [];
+    let matchCount = 0;
+
+    for (let i = this.rawLogs.length - 1; i >= 0; i--) {
+      const e = this.rawLogs[i];
+      const ts = e.timestamp.getTime();
+
+      if (filter.start !== undefined && ts < filter.start - 60_000) break;
+      if (filter.end !== undefined && ts > filter.end) continue;
+
+      // Status filter: success/failure 依据日志等级与 HTTP 状态
+      if (filter.kind && filter.kind !== 'all') {
+        if (filter.kind === 'success') {
+          const ok = isGin(e) ? e.statusCode < 400 : !isError(e);
+          if (!ok) continue;
+        } else if (filter.kind === 'failure') {
+          const fail = isGin(e) ? e.statusCode >= 400 : isError(e);
+          if (!fail) continue;
+        } else if (filter.kind === 'consume' && !isConsume(e)) {
+          continue;
+        } else if (filter.kind === 'gin' && !isGin(e)) {
+          continue;
+        } else if (filter.kind === 'error' && !isError(e)) {
+          continue;
+        }
+      }
+
+        if (filter.q) {
+          const q = filter.q.toLowerCase();
+          let haystack = '';
+          if (isConsume(e)) {
+            haystack = `${e.params.model_name} ${e.params.token_name} ${e.params.group} ${e.requestId}`.toLowerCase();
+          } else if (isGin(e)) {
+            haystack = `${e.path} ${e.ip} ${e.method} ${e.requestId}`.toLowerCase();
+          } else if (isError(e)) {
+            haystack = `${e.message} ${e.requestId}`.toLowerCase();
+          } else {
+            haystack = `${e.message} ${'requestId' in e ? e.requestId : ''}`.toLowerCase();
+          }
+          if (!haystack.includes(q)) continue;
+        }
+
+      if (matchCount >= offset && results.length < limit) {
+        results.push(e);
+      }
+      matchCount++;
+    }
+
+    return { total: matchCount, data: results };
   }
 
   searchLogs(filter: LogSearchFilter): { total: number; data: ParsedLogEntry[] } {

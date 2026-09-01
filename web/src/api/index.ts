@@ -11,8 +11,7 @@ import type {
   DimensionType,
   HealthInfo,
   LogFacetsResponse,
-  LogListResponse,
-  LogSearchFilter,
+  RawLogResponse,
   OverviewSummary,
   TimelineBucket,
 } from './types';
@@ -67,16 +66,18 @@ export const api = {
   },
 
   logs: {
-    recent(limit = 50, offset = 0): Promise<LogListResponse> {
-      return request('/api/v1/logs/recent', { limit, offset });
-    },
-    search(filter: LogSearchFilter): Promise<LogListResponse> {
-      return request('/api/v1/logs/search', {
+    /** 原始日志流（全量、不去重；kind: all/consume/gin/error/success/failure） */
+    stream(filter: {
+      kind?: string;
+      q?: string;
+      start?: number;
+      end?: number;
+      limit?: number;
+      offset?: number;
+    } = {}): Promise<RawLogResponse> {
+      return request('/api/v1/logs/stream', {
+        kind: filter.kind,
         q: filter.q,
-        model: filter.model,
-        user: filter.user,
-        channel: filter.channel,
-        ip: filter.ip,
         start: filter.start,
         end: filter.end,
         limit: filter.limit,

@@ -9,7 +9,51 @@ import type { IStore } from '../store/interface.js';
 import type { AnalysisEngine } from '../engine/registry.js';
 import { requireWsAuth } from '../api/auth.js';
 import type { ParsedLogEntry } from '../types/log.js';
-import { isConsume } from '../types/log.js';
+import { isConsume, isError, isGin } from '../types/log.js';
+
+/** 将解析日志转为与 /api/v1/logs/stream 一致的原始日志格式 */
+function toRawLog(e: ParsedLogEntry) {
+  const base = {
+    timestamp: e.timestamp.getTime(),
+    requestId: 'requestId' in e ? e.requestId : null,
+    sourceFile: e.sourceFile,
+  };
+  if (isConsume(e)) {
+    return {
+      ...base,
+      level: 'INFO' as const,
+      kind: 'consume' as const,
+      success: true,
+      message: `消耗记录 userId=${e.userId} model=${e.params.model_name} tokens=${e.params.prompt_tokens}+${e.params.completion_tokens} quota=${e.params.quota}`,
+    };
+  }
+  if (isGin(e)) {
+    return {
+      ...base,
+      level: 'GIN' as const,
+      kind: 'gin' as const,
+      success: e.statusCode < 400,
+      statusCode: e.statusCode,
+      message: `${e.method} ${e.path} -> ${e.statusCode} (${e.duration})`,
+    };
+  }
+  if (isError(e)) {
+    return {
+      ...base,
+      level: 'ERR' as const,
+      kind: 'error' as const,
+      success: false,
+      message: e.message,
+    };
+  }
+  return {
+    ...base,
+    level: e.level as 'SYS' | 'INFO',
+    kind: e.level === 'SYS' ? 'sys' : 'info',
+    success: true,
+    message: e.message,
+  };
+}
 
 const log = createLogger('ws');
 
@@ -162,7 +206,7 @@ export class WsHub implements Lifecycle {
     for (const client of this.clients) {
       const filtered = this.applyFilters(batch, client.filters);
       if (filtered.length > 0) {
-        this.send(client, { type: 'new_logs', data: filtered });
+        this.send(client, { type: 'new_logs', data: filtered.map(toRawLog) });
       }
     }
   }

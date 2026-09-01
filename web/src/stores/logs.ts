@@ -1,26 +1,22 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { api } from '@/api';
-import type { LogEntry, LogFacetsResponse, LogSearchFilter } from '@/api/types';
+import type { RawLogEntry, RawLogKind } from '@/api/types';
 import { PAGE_SIZE } from '@/lib/constants';
 import { useAppStore } from './app';
 
-/** 日志检索：筛选条件（带候选值）、分页、详情、实时追加 */
+/** 原始日志流：全量展示、按状态筛选、分页 */
 export const useLogsStore = defineStore('logs', () => {
-  const entries = ref<LogEntry[]>([]);
+  const entries = ref<RawLogEntry[]>([]);
   const total = ref(0);
   const offset = ref(0);
   const loading = ref(false);
-  const filters = ref<LogSearchFilter>({});
-  const facets = ref<LogFacetsResponse | null>(null);
-  const selected = ref<LogEntry | null>(null);
-  const liveEntries = ref<LogEntry[]>([]);
+  const kind = ref<RawLogKind>('all');
+  const q = ref('');
+  const selected = ref<RawLogEntry | null>(null);
+  const liveEntries = ref<RawLogEntry[]>([]);
 
   const limit = PAGE_SIZE;
-
-  async function loadFacets(): Promise<void> {
-    facets.value = await api.logs.facets();
-  }
 
   async function search(reset = true): Promise<void> {
     loading.value = true;
@@ -28,11 +24,11 @@ export const useLogsStore = defineStore('logs', () => {
       if (reset) offset.value = 0;
       const app = useAppStore();
       const now = Date.now();
-      const start = now - app.rangeHours * 3_600_000;
-      const res = await api.logs.search({
-        ...filters.value,
-        start: filters.value.start ?? start,
-        end: filters.value.end ?? now,
+      const res = await api.logs.stream({
+        kind: kind.value,
+        q: q.value || undefined,
+        start: now - app.rangeHours * 3_600_000,
+        end: now,
         limit,
         offset: offset.value,
       });
@@ -43,12 +39,14 @@ export const useLogsStore = defineStore('logs', () => {
     }
   }
 
-  function setFilter<K extends keyof LogSearchFilter>(key: K, value: LogSearchFilter[K]): void {
-    filters.value = { ...filters.value, [key]: value || undefined };
+  async function setKind(k: RawLogKind): Promise<void> {
+    kind.value = k;
+    await search(true);
   }
 
-  function clearFilters(): void {
-    filters.value = {};
+  async function setQuery(value: string): Promise<void> {
+    q.value = value;
+    await search(true);
   }
 
   async function goTo(page: number): Promise<void> {
@@ -56,12 +54,12 @@ export const useLogsStore = defineStore('logs', () => {
     await search(false);
   }
 
-  function select(entry: LogEntry | null): void {
+  function select(entry: RawLogEntry | null): void {
     selected.value = entry;
   }
 
   /** 实时日志追加（保留最近 200 条） */
-  function appendLive(list: LogEntry[]): void {
+  function appendLive(list: RawLogEntry[]): void {
     liveEntries.value = [...list, ...liveEntries.value].slice(0, 200);
   }
 
@@ -71,14 +69,13 @@ export const useLogsStore = defineStore('logs', () => {
     offset,
     limit,
     loading,
-    filters,
-    facets,
+    kind,
+    q,
     selected,
     liveEntries,
-    loadFacets,
     search,
-    setFilter,
-    clearFilters,
+    setKind,
+    setQuery,
     goTo,
     select,
     appendLive,

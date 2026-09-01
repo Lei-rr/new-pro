@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
 import { RealtimeClient } from '@/api/ws';
-import type { Alert, LogEntry, OverviewSummary, WsMessage } from '@/api/types';
+import type { Alert, OverviewSummary, RawLogEntry, WsMessage } from '@/api/types';
 
 /**
  * WS 实时数据分发层：唯一接触 RealtimeClient 的 store。
@@ -14,7 +14,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
   const alerts = ref<Alert[]>([]);
 
   const alertListeners = new Set<(a: Alert) => void>();
-  const logListeners = new Set<(entries: LogEntry[]) => void>();
+  const logListeners = new Set<(entries: RawLogEntry[]) => void>();
 
   function handle(msg: WsMessage): void {
     switch (msg.type) {
@@ -41,7 +41,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
     return () => alertListeners.delete(fn);
   }
 
-  function onLogs(fn: (entries: LogEntry[]) => void): () => void {
+  function onLogs(fn: (entries: RawLogEntry[]) => void): () => void {
     logListeners.add(fn);
     return () => logListeners.delete(fn);
   }

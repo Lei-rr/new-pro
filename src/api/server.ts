@@ -46,7 +46,7 @@ function buildRouteRegistrars(
     (app) => registerCostRoutes(app, store, engine),
     (app) => registerLogRoutes(app, store),
     (app) => registerAlertRoutes(app, engine),
-    (app) => registerDashboardRoutes(app, store),
+    (app) => registerDashboardRoutes(app, store, engine),
     (app) => registerCostAnalyticsRoutes(app, store),
     (app) => registerMetricsRoutes(app, store),
   ];

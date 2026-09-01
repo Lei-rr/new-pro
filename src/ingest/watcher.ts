@@ -6,7 +6,6 @@ import { createLogger } from '../core/logger.js';
 import { EventBus } from '../core/event-bus.js';
 import { getEnv } from '../env.js';
 import { parseLines } from './parser.js';
-import { CheckpointStore } from './checkpoint.js';
 import type { ParsedLogEntry } from '../types/log.js';
 
 const log = createLogger('watcher');
@@ -23,32 +22,26 @@ function globToRegExp(pattern: string): RegExp {
 /**
  * Watches the NewAPI log directory for changes.
  * Reads new lines incrementally and emits parsed entries via EventBus.
- * Resume state (per-file offsets) is persisted via CheckpointStore so a
- * restart ingests only new lines instead of replaying all history.
+ *
+ * NOTE: the store is in-memory, so on every restart the full history is
+ * replayed from scratch. This is intentional: a persistent offset
+ * checkpoint would skip history the fresh store needs (see ReplayGuard
+ * for double-count protection when files are re-read).
  */
 export class LogWatcher implements Lifecycle {
   private fileOffsets = new Map<string, number>();
   private watcher: FSWatcher | null = null;
-  private saveTimer: ReturnType<typeof setInterval> | null = null;
   private bus: EventBus;
-  private checkpoint: CheckpointStore;
 
-  constructor(bus: EventBus, checkpoint: CheckpointStore) {
+  constructor(bus: EventBus) {
     this.bus = bus;
-    this.checkpoint = checkpoint;
   }
 
-  /** Load all existing log files on startup (incrementally when checkpointed) */
+  /** Load all existing log files on startup */
   async start(): Promise<void> {
     const env = getEnv();
     const dir = env.LOG_DIR;
     const pattern = globToRegExp(env.LOG_PATTERN);
-
-    // Resume from persisted offsets (incremental recovery after restart)
-    const state = this.checkpoint.load();
-    for (const [file, offset] of Object.entries(state.offsets)) {
-      this.fileOffsets.set(file, offset);
-    }
 
     let files: string[];
     try {
@@ -66,10 +59,7 @@ export class LogWatcher implements Lifecycle {
 
     const allEntries: ParsedLogEntry[] = [];
     for (const file of files) {
-      const fullPath = path.join(dir, file);
-      // Already-processed files resume from their saved offset
-      const startOffset = this.fileOffsets.get(fullPath) ?? 0;
-      const entries = await this.readNewLines(fullPath, startOffset);
+      const entries = await this.readNewLines(path.join(dir, file), 0);
       for (const entry of entries) {
         allEntries.push(entry);
       }
@@ -86,31 +76,14 @@ export class LogWatcher implements Lifecycle {
     }
 
     this.startWatching();
-
-    // Periodic checkpoint persistence
-    this.saveTimer = setInterval(() => void this.persist(), env.CHECKPOINT_INTERVAL_MS);
-    this.saveTimer.unref();
   }
 
   async stop(): Promise<void> {
-    if (this.saveTimer) {
-      clearInterval(this.saveTimer);
-      this.saveTimer = null;
-    }
-    await this.persist();
     if (this.watcher) {
       await this.watcher.close();
       this.watcher = null;
       log.info('File watcher stopped');
     }
-  }
-
-  private async persist(): Promise<void> {
-    const offsets: Record<string, number> = {};
-    for (const [file, offset] of this.fileOffsets) {
-      offsets[file] = offset;
-    }
-    await this.checkpoint.save({ offsets });
   }
 
   private startWatching(): void {

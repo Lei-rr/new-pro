@@ -4,7 +4,6 @@ import { logger } from './core/logger.js';
 import { getEnv } from './env.js';
 import { MemoryStore } from './store/memory.js';
 import { LogWatcher } from './ingest/watcher.js';
-import { CheckpointStore } from './ingest/checkpoint.js';
 import {
   AnalysisEngine,
   IpPlugin,
@@ -47,9 +46,8 @@ async function bootstrap(): Promise<void> {
   const wsHub = new WsHub(store, engine, bus);
   container.register('wsHub', wsHub);
 
-  // ─── Ingest (resumes incrementally from checkpoint) ───
-  const checkpoint = new CheckpointStore(env.CHECKPOINT_PATH);
-  const watcher = new LogWatcher(bus, checkpoint);
+  // ─── Ingest (full history replay on startup; store is in-memory) ───
+  const watcher = new LogWatcher(bus);
   container.register('watcher', watcher);
 
   // ─── Wire EventBus → Store ───

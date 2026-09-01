@@ -13,7 +13,6 @@ services:
     volumes:
       # 直接将宿主机 NewAPI 日志目录挂载至容器 /logs（只读安全挂载）
       - "${LOG_PATH:-/guolei/new-api/logs}:/logs:ro"
-      # 摄入进度 checkpoint（重启后增量恢复，不再全量重放历史）
       - newpro-data:/app/data
     read_only: true
     tmpfs:

@@ -34,6 +34,12 @@ export interface IStore {
   /** Search consume entries, paginated */
   searchLogs(filter: LogSearchFilter): { total: number; data: ParsedLogEntry[] };
 
+  /**
+   * Raw log stream (every parsed line: GIN/consume/ERR/INFO/SYS),
+   * newest-first, optionally filtered by level/status. No dedup.
+   */
+  getRawLogs(filter: RawLogFilter): { total: number; data: ParsedLogEntry[] };
+
   /** Entry counts */
   getEntryCount(): number;
   getConsumeCount(): number;
@@ -51,6 +57,16 @@ export interface LogSearchFilter {
   user?: string;
   channel?: string;
   ip?: string;
+  start?: number;
+  end?: number;
+  limit?: number;
+  offset?: number;
+}
+
+export interface RawLogFilter {
+  /** 'all' | GIN/consume level, or 'success' | 'error' */
+  kind?: 'all' | 'consume' | 'gin' | 'error' | 'success' | 'failure';
+  q?: string;
   start?: number;
   end?: number;
   limit?: number;

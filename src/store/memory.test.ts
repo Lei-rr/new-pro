@@ -223,6 +223,26 @@ describe('MemoryStore', () => {
     expect(s.totalQuota).toBe(100_000);
   });
 
+  it('keeps a raw stream of every parsed line (no dedup in viewer)', () => {
+    const store = new MemoryStore();
+    store.append(consume({ requestId: 'r1', model: 'gpt-4' }));
+    store.append(gin({ requestId: 'r1', statusCode: 200 }));
+    store.append(gin({ requestId: 'r2', statusCode: 500 }));
+    store.append({ ...error(), message: 'boom' });
+
+    const all = store.getRawLogs({ limit: 50 });
+    expect(all.total).toBe(4);
+    expect(all.data).toHaveLength(4);
+    // 最新在前
+    expect(all.data[0].message).toBe('boom');
+
+    const failures = store.getRawLogs({ kind: 'failure', limit: 50 });
+    expect(failures.total).toBe(2); // 500 GIN + ERR
+
+    const successes = store.getRawLogs({ kind: 'success', limit: 50 });
+    expect(successes.total).toBe(2); // consume + 200 GIN
+  });
+
   it('aggregates windowed summary from buckets only (no global fallbacks)', () => {
     const store = new MemoryStore();
     // Align to a local hour boundary so hour-bucket granularity is deterministic

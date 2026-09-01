@@ -6,7 +6,7 @@
 
 ## ✨ 核心特性
 
-- ⚡ **实时日志监听与流式解析**：毫秒级监听 NewAPI 日志目录，自动双向关联 GIN 网关请求与消费计费记录；摄入进度 checkpoint 持久化，重启增量恢复。
+- ⚡ **实时日志监听与流式解析**：毫秒级监听 NewAPI 日志目录，自动双向关联 GIN 网关请求与消费计费记录。
 - 📊 **现代化企业级控制台**（Vite + Vue3 + Tailwind v4 + shadcn-vue）：
   - **总览**：核心 KPI（含环比）、请求/错误复合趋势图、Top 模型榜、实时日志流。
   - **实时日志**：模型/渠道/用户筛选（候选值下拉）、桌面表格 / 移动卡片自适应、详情抽屉（Tokens、成本、倍率、FRT 全字段）。
@@ -54,7 +54,7 @@ docker compose up -d --build
 
 启动完成后，在浏览器中访问：**`http://localhost:3600`** 即可使用。
 
-> **API 约定**：REST 接口挂载在 `/api/v1/*`（旧 `/api/*` 前缀保留兼容）；健康探针 `/api/v1/health/live`（存活）与 `/api/v1/health/ready`（就绪，历史日志加载完成前返回 503）；Prometheus 指标 `/api/v1/metrics`；WebSocket 入口 `/ws`（API Key 优先通过子协议 `api_key.<token>` 传递）。摄入进度持久化在 `CHECKPOINT_PATH`（默认 `./data/checkpoint.json`，容器内为 `/app/data` 卷），重启后增量恢复，不再全量重放历史日志。
+> **API 约定**：REST 接口挂载在 `/api/v1/*`（旧 `/api/*` 前缀保留兼容）；健康探针 `/api/v1/health/live`（存活）与 `/api/v1/health/ready`（就绪，历史日志加载完成前返回 503）；Prometheus 指标 `/api/v1/metrics`；WebSocket 入口 `/ws`（API Key 优先通过子协议 `api_key.<token>` 传递）。
 
 ---
 
