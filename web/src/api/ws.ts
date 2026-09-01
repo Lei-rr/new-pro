@@ -61,6 +61,13 @@ export class RealtimeClient {
     return () => this.listeners.delete(fn);
   }
 
+  /** 发送客户端消息（如 range 窗口） */
+  send(payload: unknown): void {
+    if (this.sock?.readyState === WebSocket.OPEN) {
+      this.sock.send(JSON.stringify(payload));
+    }
+  }
+
   onStatus(fn: (open: boolean) => void): () => void {
     this.statusListeners.add(fn);
     return () => this.statusListeners.delete(fn);

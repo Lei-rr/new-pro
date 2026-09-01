@@ -57,10 +57,15 @@ export const useRealtimeStore = defineStore('realtime', () => {
     client.connect();
   }
 
+  /** 告知后端本客户端的窗口范围，stats 推送按窗口聚合 */
+  function sendRange(hours: number): void {
+    client.send({ type: 'range', data: { rangeHours: hours } });
+  }
+
   function disconnect(): void {
     offStatus();
     client.disconnect();
   }
 
-  return { connected, summary, alerts, connect, disconnect, onAlert, onSummary, onLogs };
+  return { connected, summary, alerts, connect, disconnect, sendRange, onAlert, onSummary, onLogs };
 });

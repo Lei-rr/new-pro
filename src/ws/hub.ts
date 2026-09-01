@@ -67,9 +67,16 @@ const wsFilterSchema = z.object({
   users: z.array(z.number().int()).optional(),
 });
 
+/** Validated client-side range filter (hours) for windowed stats. */
+const wsRangeSchema = z.object({
+  rangeHours: z.number().int().min(1).max(168).optional(),
+});
+
 interface WsClient {
   socket: WebSocket;
   filters?: z.infer<typeof wsFilterSchema>;
+  /** Dashboard window in hours; stats broadcasts are scoped to it. */
+  rangeHours?: number;
 }
 
 /**
@@ -105,7 +112,7 @@ export class WsHub implements Lifecycle {
 
       log.info({ clients: this.clients.size }, 'WebSocket client connected');
 
-      // Send initial snapshot
+      // Send initial snapshot (all-time, range sent by client shortly after)
       this.send(client, {
         type: 'snapshot',
         data: {
@@ -125,6 +132,12 @@ export class WsHub implements Lifecycle {
               client.filters = parsed.data;
             } else {
               log.debug({ err: parsed.error.issues }, 'Ignoring invalid WS filter');
+            }
+          }
+          if (msg.type === 'range' && msg.data) {
+            const parsed = wsRangeSchema.safeParse(msg.data);
+            if (parsed.success && parsed.data.rangeHours !== undefined) {
+              client.rangeHours = parsed.data.rangeHours;
             }
           }
         } catch {
@@ -158,13 +171,21 @@ export class WsHub implements Lifecycle {
         this.broadcast({ type: 'alert', data: alert });
       }
 
-      this.broadcast({
-        type: 'stats_update',
-        data: {
-          summary: this.store.getSummary(),
-          alerts: this.engine.checkAlerts(),
-        },
-      });
+      // Per-client summary scoped to the requested range window
+      const now = Date.now();
+      for (const client of this.clients) {
+        const hours = client.rangeHours;
+        const summary = hours
+          ? this.store.getSummary(now - hours * 3_600_000, now)
+          : this.store.getSummary();
+        this.send(client, {
+          type: 'stats_update',
+          data: {
+            summary,
+            alerts: this.engine.checkAlerts(),
+          },
+        });
+      }
     }, env.WS_STATS_INTERVAL_MS);
 
     // Periodic log batch flush
