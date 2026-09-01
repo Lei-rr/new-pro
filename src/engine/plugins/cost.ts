@@ -1,40 +1,32 @@
 import type { AnalysisPlugin } from '../plugin.js';
-import type { ParsedLogEntry } from '../../types/log.js';
-import { isConsume } from '../../types/log.js';
 import type { Alert } from '../../types/stats.js';
+import type { IStore } from '../../store/interface.js';
 import { getEnv } from '../../env.js';
-import { QUOTA_PER_COST_UNIT, toDateString } from '../../utils/format.js';
+import { QUOTA_PER_COST_UNIT } from '../../constants.js';
+import { toDateString } from '../../utils/time.js';
 
 /**
  * Daily cost tracking and high-spend alerting.
+ *
+ * All aggregation lives in the store (single source of truth); this plugin
+ * only evaluates the daily threshold against the store's daily totals.
  */
 export class CostPlugin implements AnalysisPlugin {
   readonly name = 'cost';
 
-  private dailyQuota = new Map<string, number>();
-  private totalQuota = 0;
-  private totalRequests = 0;
+  private store: IStore | null = null;
 
-  ingest(entry: ParsedLogEntry): void {
-    if (!isConsume(entry)) return;
-
-    const date = toDateString(entry.timestamp);
-    this.dailyQuota.set(date, (this.dailyQuota.get(date) ?? 0) + entry.params.quota);
-    this.totalQuota += entry.params.quota;
-    this.totalRequests++;
+  bindStore(store: IStore): void {
+    this.store = store;
   }
 
   checkAlerts(): Alert[] {
-    // Prune daily buckets beyond the max query window
-    const dayCutoff = toDateString(new Date(Date.now() - 90 * 86_400_000));
-    for (const key of this.dailyQuota.keys()) {
-      if (key < dayCutoff) this.dailyQuota.delete(key);
-    }
+    if (!this.store) return [];
 
     const threshold = getEnv().ALERT_QUOTA_THRESHOLD;
     const alerts: Alert[] = [];
-    const today = toDateString(new Date());
-    const todayQuota = this.dailyQuota.get(today) ?? 0;
+    const today = toDateString(new Date(), getEnv().LOG_TZ);
+    const todayQuota = this.store.getDailyQuota(today);
 
     if (todayQuota > threshold) {
       alerts.push({
@@ -51,16 +43,17 @@ export class CostPlugin implements AnalysisPlugin {
   }
 
   getSummary(): Record<string, unknown> {
-    const today = toDateString(new Date());
+    if (!this.store) return {};
+    const s = this.store.getSummary();
+    const today = toDateString(new Date(), getEnv().LOG_TZ);
+    const todayQuota = this.store.getDailyQuota(today);
     return {
-      totalQuota: this.totalQuota,
-      totalCost: this.totalQuota / QUOTA_PER_COST_UNIT,
-      totalRequests: this.totalRequests,
-      todayQuota: this.dailyQuota.get(today) ?? 0,
-      todayCost: (this.dailyQuota.get(today) ?? 0) / QUOTA_PER_COST_UNIT,
-      avgCostPerRequest: this.totalRequests > 0
-        ? (this.totalQuota / QUOTA_PER_COST_UNIT) / this.totalRequests
-        : 0,
+      totalQuota: s.totalQuota,
+      totalCost: s.totalCost,
+      totalRequests: s.billingRequests,
+      todayQuota,
+      todayCost: todayQuota / QUOTA_PER_COST_UNIT,
+      avgCostPerRequest: s.billingRequests > 0 ? s.totalCost / s.billingRequests : 0,
     };
   }
 }

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia';
 import { ref } from 'vue';
-import { wsUrl } from '@/api/http';
+import { wsProtocols, wsUrl } from '@/api/http';
 import { mapWsEntry } from '@/api/ws-mapper';
 import type { LogEntry, WsMessage } from '@/api/types';
 import { useOverviewStore } from './overview';
@@ -44,7 +44,7 @@ export const useWsStore = defineStore('ws', () => {
       return;
     }
     status.value = 'connecting';
-    const ws = new WebSocket(wsUrl());
+    const ws = new WebSocket(wsUrl(), wsProtocols());
     sock = ws;
 
     ws.onopen = () => {

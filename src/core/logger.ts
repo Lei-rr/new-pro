@@ -1,11 +1,22 @@
 import pino from 'pino';
+import type { LoggerOptions } from 'pino';
 import { getEnv } from '../env.js';
 
-export function createLogger(name?: string) {
+/**
+ * Shared pino options: JSON structured logs in production/test,
+ * pretty-printed in development.
+ */
+export function buildLoggerOptions(name?: string): LoggerOptions {
   const env = getEnv();
-  const opts: pino.LoggerOptions = {
+  const opts: LoggerOptions = {
     level: env.LOG_LEVEL,
     ...(name && { name }),
+    // Redact request URLs (they may carry ?api_key= from legacy clients)
+    // and sensitive headers from structured logs.
+    redact: {
+      paths: ['req.url', 'res.headers["set-cookie"]'],
+      censor: '[REDACTED]',
+    },
   };
 
   if (env.NODE_ENV === 'development') {
@@ -19,7 +30,11 @@ export function createLogger(name?: string) {
     };
   }
 
-  return pino(opts);
+  return opts;
+}
+
+export function createLogger(name?: string) {
+  return pino(buildLoggerOptions(name));
 }
 
 export const logger = createLogger('analytics');

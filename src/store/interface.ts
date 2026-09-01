@@ -37,6 +37,12 @@ export interface IStore {
   /** Entry counts */
   getEntryCount(): number;
   getConsumeCount(): number;
+
+  /** Daily quota for a date key (YYYY-MM-DD) from the daily aggregation. */
+  getDailyQuota(date: string): number;
+
+  /** Per-token quota/request totals from the token dimension index. */
+  getTokenTotals(): Array<{ name: string; quota: number; requests: number }>;
 }
 
 export interface LogSearchFilter {

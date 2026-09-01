@@ -177,4 +177,76 @@ describe('MemoryStore', () => {
     expect(trend[1].date).toBe('2026-08-28');
     expect(trend[1].cost).toBe(0.3);
   });
+
+  it('counts each relay request exactly once in the IP dimension', () => {
+    const store = new MemoryStore();
+    // GIN first, consume second (regression: used to double count)
+    store.append(gin({ requestId: 'req-a', ip: '1.2.3.4', durationMs: 1200 }));
+    store.append(consume({ requestId: 'req-a', quota: 100_000 }));
+    // consume first, GIN second
+    store.append(consume({ requestId: 'req-b', quota: 200_000 }));
+    store.append(gin({ requestId: 'req-b', ip: '1.2.3.4', durationMs: 800 }));
+
+    const ips = store.getDimensionStats('ip');
+    expect(ips.total).toBe(1);
+    const ip = ips.data.find((d) => d.key === '1.2.3.4');
+    expect(ip).toBeDefined();
+    expect(ip!.requests).toBe(2);
+    expect(ip!.quota).toBe(300_000);
+    // avgResponseTime uses GIN duration caliber: (1200 + 800) / 2 / 1000 s
+    expect(ip!.avgResponseTime).toBeCloseTo(1.0);
+  });
+
+  it('counts client_gone once per logical cancel (consume is the single source)', () => {
+    const store = new MemoryStore();
+    const c = consume({ requestId: 'req-1' });
+    c.params.is_stream = true;
+    c.params.other = { ...c.params.other, stream_status: { end_reason: 'client_gone' } };
+    store.append(c);
+    // ERR line describing the same cancellation must not increment again
+    store.append({ ...error(), message: 'stream closed: client_gone' });
+
+    const s = store.getSummary();
+    expect(s.clientGoneCount).toBe(1);
+  });
+
+  it('ignores replayed entries (requestId dedup guard)', () => {
+    const store = new MemoryStore();
+    store.append(consume({ requestId: 'r1', quota: 100_000 }));
+    store.append(consume({ requestId: 'r1', quota: 100_000 }));
+    store.append(gin({ requestId: 'r1' }));
+    store.append(gin({ requestId: 'r1' }));
+
+    const s = store.getSummary();
+    expect(s.billingRequests).toBe(1);
+    expect(s.totalRequests).toBe(1);
+    expect(s.totalQuota).toBe(100_000);
+  });
+
+  it('aggregates windowed summary from buckets only (no global fallbacks)', () => {
+    const store = new MemoryStore();
+    // Align to a local hour boundary so hour-bucket granularity is deterministic
+    const localHourStart = new Date();
+    localHourStart.setMinutes(0, 0, 0);
+    const hourStartMs = localHourStart.getTime();
+    const tIn = new Date(hourStartMs + 10 * 60_000);
+    const tOut = new Date(hourStartMs - 3 * 3600_000 + 10 * 60_000);
+    const startMs = hourStartMs - 3600_000;
+    const endMs = hourStartMs + 3600_000;
+
+    store.append(gin({ requestId: 'r1', ip: '1.1.1.1', timestamp: tIn, durationMs: 1000 }));
+    store.append(consume({ requestId: 'r1', timestamp: tIn }));
+    store.append({ ...error(tIn), message: 'oops' });
+    store.append(gin({ requestId: 'r2', ip: '2.2.2.2', timestamp: tOut }));
+    store.append(consume({ requestId: 'r2', timestamp: tOut }));
+
+    const s = store.getSummary(startMs, endMs);
+    expect(s.totalRequests).toBe(1);
+    expect(s.errorLogCount).toBe(1);
+    expect(s.activeIps).toBe(1);
+    // windowed avgResponseTime = ginDurationMs / requests / 1000
+    expect(s.avgResponseTime).toBeCloseTo(1.0);
+    expect(s.firstEntry).not.toBeNull();
+    expect(s.lastEntry).not.toBeNull();
+  });
 });

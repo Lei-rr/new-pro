@@ -4,12 +4,17 @@ import { getEnv } from '../env.js';
 
 const log = createLogger('auth');
 
-/** Paths that never require auth (health checks / probes). */
-const OPEN_PATHS = ['/api/health'];
+/** Paths that never require auth (health checks / probes / metrics scrape). */
+const OPEN_PATHS = ['/api/health', '/api/v1/health', '/api/metrics', '/api/v1/metrics'];
 
-/** Load configured API keys (comma-separated). */
+let cachedKeys: string[] | null = null;
+
+/** Load configured API keys (comma-separated), parsed once at startup. */
 export function loadApiKeys(): string[] {
-  return getEnv().API_KEYS.split(',').map((k) => k.trim()).filter(Boolean);
+  if (cachedKeys === null) {
+    cachedKeys = getEnv().API_KEYS.split(',').map((k) => k.trim()).filter(Boolean);
+  }
+  return cachedKeys;
 }
 
 /** Constant-time string comparison (avoids timing attacks). */
@@ -37,6 +42,20 @@ export function extractApiKey(headers: FastifyRequest['headers']): string | unde
   return value.trim();
 }
 
+/**
+ * Extract an API key from the WebSocket subprotocol 'api_key.<token>'.
+ * Preferred over the query string so keys don't leak into access logs.
+ */
+export function extractWsApiKey(headers: FastifyRequest['headers']): string | undefined {
+  const proto = headers['sec-websocket-protocol'];
+  if (typeof proto !== 'string') return undefined;
+  for (const part of proto.split(',')) {
+    const p = part.trim();
+    if (p.startsWith('api_key.')) return p.slice('api_key.'.length).trim();
+  }
+  return undefined;
+}
+
 function isOpenPath(url: string): boolean {
   const path = url.split('?')[0];
   return OPEN_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
@@ -60,12 +79,15 @@ export function registerAuth(app: FastifyInstance): void {
   });
 }
 
-/** preValidation guard for the WebSocket route (browsers pass key via query). */
+/** preValidation guard for the WebSocket route. */
 export async function requireWsAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
   const keys = loadApiKeys();
   if (keys.length === 0) return; // auth disabled
-  const query = request.query as Record<string, unknown>;
-  const token = typeof query.api_key === 'string' ? query.api_key : extractApiKey(request.headers);
+  // Subprotocol first; fall back to query/header for legacy clients.
+  const token = extractWsApiKey(request.headers)
+    ?? (typeof (request.query as Record<string, unknown>).api_key === 'string'
+      ? (request.query as Record<string, unknown>).api_key as string
+      : extractApiKey(request.headers));
   if (!isValidToken(token, keys)) {
     await reply.code(401).send({ error: 'Unauthorized', statusCode: 401 });
   }

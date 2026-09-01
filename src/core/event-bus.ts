@@ -1,25 +1,24 @@
 import EventEmitter from 'eventemitter3';
-import type { AppEvents } from '../types/events.js';
+import type { ParsedLogEntry } from '../types/log.js';
+import type { Alert } from '../types/stats.js';
+
+/**
+ * Centralized event type map — the EventBus is strongly typed against it.
+ */
+export interface AppEvents {
+  /** Single parsed log entry ingested */
+  'log:entry': [entry: ParsedLogEntry];
+
+  /** Batch of entries ingested (history load or file read) */
+  'log:batch': [entries: ParsedLogEntry[]];
+
+  /** Alert newly fired (deduped by AnalysisEngine) */
+  'alert:fired': [alert: Alert];
+}
 
 /**
  * Type-safe event bus using eventemitter3.
- * All event names and payloads defined in AppEvents interface.
+ * Plain class (no singleton): constructed once in bootstrap and injected
+ * into watcher, engine and ws hub so wiring stays explicit and testable.
  */
-export class EventBus extends EventEmitter<AppEvents> {
-  private static _instance: EventBus | null = null;
-
-  static getInstance(): EventBus {
-    if (!EventBus._instance) {
-      EventBus._instance = new EventBus();
-    }
-    return EventBus._instance;
-  }
-
-  /** Reset singleton (for testing) */
-  static reset(): void {
-    if (EventBus._instance) {
-      EventBus._instance.removeAllListeners();
-      EventBus._instance = null;
-    }
-  }
-}
+export class EventBus extends EventEmitter<AppEvents> {}

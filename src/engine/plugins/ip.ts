@@ -3,7 +3,7 @@ import type { ParsedLogEntry } from '../../types/log.js';
 import { isGin } from '../../types/log.js';
 import type { Alert } from '../../types/stats.js';
 import { getEnv } from '../../env.js';
-import { toMinuteKey } from '../../utils/format.js';
+import { toMinuteKey } from '../../utils/time.js';
 
 /** Rolling window for IP activity tracking. */
 const WINDOW_MS = 60 * 60 * 1000; // 1 hour
@@ -31,7 +31,7 @@ export class IpPlugin implements AnalysisPlugin {
       this.minuteRates.set(ip, minutes);
     }
 
-    const mk = toMinuteKey(entry.timestamp);
+    const mk = toMinuteKey(entry.timestamp, getEnv().LOG_TZ);
     minutes.set(mk, (minutes.get(mk) ?? 0) + 1);
     this.lastSeen.set(ip, ts);
 
@@ -59,7 +59,7 @@ export class IpPlugin implements AnalysisPlugin {
 
     const threshold = getEnv().ALERT_IP_RATE_PER_MIN;
     const alerts: Alert[] = [];
-    const currentMinute = toMinuteKey(new Date(now));
+    const currentMinute = toMinuteKey(new Date(now), getEnv().LOG_TZ);
 
     for (const [ip, minutes] of this.minuteRates) {
       const rate = minutes.get(currentMinute) ?? 0;

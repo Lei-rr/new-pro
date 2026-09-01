@@ -26,7 +26,7 @@ jobs:
           version: 11
 
       - name: Install dependencies (Backend)
-        run: pnpm install --config.onlyBuiltDependencies=esbuild
+        run: pnpm install --frozen-lockfile --config.onlyBuiltDependencies=esbuild
 
       - name: Type check & Lint (Backend)
         run: pnpm run lint
@@ -37,8 +37,11 @@ jobs:
       - name: Build Backend
         run: pnpm run build
 
+      - name: Dependency audit (Backend)
+        run: pnpm audit --prod
+
       - name: Install dependencies (Frontend)
-        run: pnpm install --config.onlyBuiltDependencies=esbuild,vue-demi
+        run: pnpm install --frozen-lockfile --config.onlyBuiltDependencies=esbuild,vue-demi
         working-directory: web
 
       - name: Type check (Frontend)

@@ -4,6 +4,7 @@ import { EventBus } from '../core/event-bus.js';
 import type { AnalysisPlugin } from './plugin.js';
 import type { ParsedLogEntry } from '../types/log.js';
 import type { Alert } from '../types/stats.js';
+import type { IStore } from '../store/interface.js';
 
 const log = createLogger('engine');
 
@@ -13,10 +14,13 @@ const ALERT_COOLDOWN_MS = 60_000;
 /**
  * Plugin registry and event wiring.
  * Listens to EventBus for log entries and fans out to all plugins.
+ * Optionally binds a store to plugins so aggregations have a single source
+ * of truth instead of being duplicated per plugin.
  */
 export class AnalysisEngine implements Lifecycle {
   private plugins = new Map<string, AnalysisPlugin>();
   private bus: EventBus;
+  private store: IStore | null = null;
   private lastFired = new Map<string, number>();
 
   // Bound handlers so on/off reference equality holds
@@ -28,8 +32,9 @@ export class AnalysisEngine implements Lifecycle {
     this.ingestBatch(entries);
   };
 
-  constructor(bus?: EventBus) {
-    this.bus = bus ?? EventBus.getInstance();
+  constructor(bus: EventBus, store?: IStore) {
+    this.bus = bus;
+    this.store = store ?? null;
   }
 
   /** Register a plugin. Call before start(). */
@@ -37,6 +42,7 @@ export class AnalysisEngine implements Lifecycle {
     if (this.plugins.has(plugin.name)) {
       log.warn({ plugin: plugin.name }, 'Plugin already registered, overwriting');
     }
+    if (this.store) plugin.bindStore?.(this.store);
     this.plugins.set(plugin.name, plugin);
     return this;
   }
@@ -46,16 +52,11 @@ export class AnalysisEngine implements Lifecycle {
     return this.plugins.get(name) as T | undefined;
   }
 
-  /** Get all registered plugin names */
-  getPluginNames(): string[] {
-    return [...this.plugins.keys()];
-  }
-
   /** Feed a single entry to all plugins */
   ingest(entry: ParsedLogEntry): void {
     for (const plugin of this.plugins.values()) {
       try {
-        plugin.ingest(entry);
+        plugin.ingest?.(entry);
       } catch (err) {
         log.error({ err, plugin: plugin.name }, 'Plugin ingest failed');
       }

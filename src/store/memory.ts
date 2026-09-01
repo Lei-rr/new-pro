@@ -3,63 +3,27 @@ import { createLogger } from '../core/logger.js';
 import { getEnv } from '../env.js';
 import type { ParsedLogEntry, ConsumeLogEntry, GinLogEntry, ErrorLogEntry } from '../types/log.js';
 import { isConsume, isGin, isError } from '../types/log.js';
-import { QUOTA_PER_COST_UNIT, toDateString, toHourKey } from '../utils/format.js';
+import { QUOTA_PER_COST_UNIT } from '../constants.js';
+import { hourKeyToEpochMs, toDateString, toHourKey } from '../utils/time.js';
 import type { IStore, LogSearchFilter } from './interface.js';
 import type { DimensionType, DimensionQuery, DimensionStats, TimelineBucket, OverviewSummary, CostTrendPoint } from '../types/stats.js';
 import { DimensionIndex } from './indexes.js';
+import { newBucket, type HourBucket } from './buckets.js';
+import { RequestCorrelator } from './correlation.js';
+import { ReplayGuard } from './dedup.js';
 
 const log = createLogger('store');
-
-/** Max correlation entries kept */
-const MAX_MAP_SIZE = 50_000;
-
-interface HourBucket {
-  requests: number;        // GIN HTTP requests
-  errors: number;          // GIN status >= 400
-  consumes: number;        // Consume / billed requests in that hour
-  streamCount: number;     // Stream requests
-  clientGoneCount: number; // Client cancel count
-  promptTokens: number;
-  completionTokens: number;
-  quota: number;
-  cacheTokens: number;
-  totalTime: number;       // Sum of consume use_time_seconds
-  frtSum: number;
-  frtCount: number;
-  models: Set<string>;
-  channels: Set<number>;
-  tokens: Set<string>;
-  users: Set<number>;
-  groups: Set<string>;
-}
-
-function newBucket(): HourBucket {
-  return {
-    requests: 0,
-    errors: 0,
-    consumes: 0,
-    streamCount: 0,
-    clientGoneCount: 0,
-    promptTokens: 0,
-    completionTokens: 0,
-    quota: 0,
-    cacheTokens: 0,
-    totalTime: 0,
-    frtSum: 0,
-    frtCount: 0,
-    models: new Set(),
-    channels: new Set(),
-    tokens: new Set(),
-    users: new Set(),
-    groups: new Set(),
-  };
-}
 
 /**
  * In-memory store with multi-dimension indexes and bidirectional IP correlation.
  * Implements IStore for query interface and Lifecycle for startup/shutdown.
  */
 export class MemoryStore implements IStore, Lifecycle {
+  /** Business timezone for day/hour bucketing (from LOG_TZ). */
+  private get tz(): string {
+    return getEnv().LOG_TZ;
+  }
+
   // Typed entry arrays
   private consumeEntries: ConsumeLogEntry[] = [];
   private ginEntries: GinLogEntry[] = [];
@@ -98,9 +62,9 @@ export class MemoryStore implements IStore, Lifecycle {
   private firstEntry: Date | null = null;
   private lastEntry: Date | null = null;
 
-  // Bidirectional correlation: requestId <-> (ip / consumeEntry)
-  private requestIpMap = new Map<string, string>();
-  private pendingConsumeMap = new Map<string, ConsumeLogEntry>();
+  // Bidirectional request correlation + replay protection
+  private correlator = new RequestCorrelator();
+  private replayGuard = new ReplayGuard();
   private pruneTimer: ReturnType<typeof setInterval> | null = null;
 
   // ─── Lifecycle ───
@@ -127,6 +91,10 @@ export class MemoryStore implements IStore, Lifecycle {
   // ─── Ingest ───
 
   append(entry: ParsedLogEntry): void {
+    // Replay guard: skip entries already ingested (file re-reads after
+    // rotation/truncation would otherwise double all counters).
+    if (this.replayGuard.checkAndRemember(entry)) return;
+
     this.trackTime(entry);
 
     if (isConsume(entry)) {
@@ -142,7 +110,7 @@ export class MemoryStore implements IStore, Lifecycle {
     for (let i = 0; i < entries.length; i++) {
       this.append(entries[i]);
     }
-    log.info({ count: entries.length, total: this.totalEntries }, 'Batch ingested');
+    log.debug({ count: entries.length, total: this.totalEntries }, 'Batch ingested');
   }
 
   private trackTime(entry: ParsedLogEntry): void {
@@ -163,19 +131,12 @@ export class MemoryStore implements IStore, Lifecycle {
     if (p.is_stream) this.streamCount++;
     if (p.other?.stream_status?.end_reason === 'client_gone') this.clientGoneCount++;
 
-    // Check if GIN relay already arrived with client IP
-    const ip = this.requestIpMap.get(e.requestId);
+    // Correlate with the GIN relay entry (either side may have arrived first)
+    const ip = this.correlator.onConsume(e);
     if (ip !== undefined) {
-      this.requestIpMap.delete(e.requestId);
-      e.ip = ip;
-      this.indexes.ip.ingest(ip, e);
-    } else {
-      // Consume log arrives before GIN log; save for correlation when GIN arrives
-      this.pendingConsumeMap.set(e.requestId, e);
-      if (this.pendingConsumeMap.size > MAX_MAP_SIZE) {
-        const oldest = this.pendingConsumeMap.keys().next().value;
-        if (oldest !== undefined) this.pendingConsumeMap.delete(oldest);
-      }
+      // GIN already counted this request (ingestIpRequest); attach consume
+      // details only, so the IP dimension counts the request exactly once.
+      this.indexes.ip.addConsumeParams(ip, e);
     }
 
     // Update dimension indexes (channel, model, token, user, group)
@@ -186,7 +147,7 @@ export class MemoryStore implements IStore, Lifecycle {
     if (p.group) this.indexes.group.ingest(p.group, e);
 
     // Hourly bucket
-    const hk = toHourKey(e.timestamp);
+    const hk = toHourKey(e.timestamp, this.tz);
     let bucket = this.hourly.get(hk);
     if (!bucket) {
       bucket = newBucket();
@@ -212,7 +173,7 @@ export class MemoryStore implements IStore, Lifecycle {
     if (p.group) bucket.groups.add(p.group);
 
     // Daily cost
-    const dk = toDateString(e.timestamp);
+    const dk = toDateString(e.timestamp, this.tz);
     let day = this.dailyCost.get(dk);
     if (!day) {
       day = { quota: 0, requests: 0 };
@@ -243,29 +204,23 @@ export class MemoryStore implements IStore, Lifecycle {
     this.totalGinDurationMs += e.durationMs;
 
     // Hourly bucket: requests count at HTTP level
-    const hk = toHourKey(e.timestamp);
+    const hk = toHourKey(e.timestamp, this.tz);
     let bucket = this.hourly.get(hk);
     if (!bucket) {
       bucket = newBucket();
       this.hourly.set(hk, bucket);
     }
     bucket.requests++;
+    bucket.ginDurationMs += e.durationMs;
 
     if (e.routeType === 'relay') {
-      // Check if matching consume log already arrived
-      const consume = this.pendingConsumeMap.get(e.requestId);
+      // Correlate with the consume entry (either side may have arrived first).
+      // One relay request → one request count (GIN is the source of truth),
+      // consume details attach without re-counting.
+      const consume = this.correlator.onGin(e.requestId, e.ip);
+      this.indexes.ip.ingestIpRequest(e.ip, e.durationMs, e.timestamp.getTime());
       if (consume !== undefined) {
-        this.pendingConsumeMap.delete(e.requestId);
-        consume.ip = e.ip;
-        this.indexes.ip.ingest(e.ip, consume);
-      } else {
-        // Record IP request (without consume tokens) and save for later consume log
-        this.indexes.ip.ingestIpRequest(e.ip, e.durationMs, e.timestamp.getTime());
-        this.requestIpMap.set(e.requestId, e.ip);
-        if (this.requestIpMap.size > MAX_MAP_SIZE) {
-          const oldest = this.requestIpMap.keys().next().value;
-          if (oldest !== undefined) this.requestIpMap.delete(oldest);
-        }
+        this.indexes.ip.addConsumeParams(e.ip, consume);
       }
     }
 
@@ -285,9 +240,20 @@ export class MemoryStore implements IStore, Lifecycle {
     this.errorLogCount++;
 
     const msg = e.message;
-    if (msg.includes('client_gone')) {
-      this.clientGoneCount++;
+
+    // NOTE: "client_gone" in ERR lines describes the same cancellation event
+    // that consume records as stream_status.end_reason === 'client_gone'.
+    // clientGoneCount is only incremented from consume entries to avoid
+    // double counting one logical event.
+
+    // Hourly bucket for ERR diagnostic lines (windowed summaries)
+    const hk = toHourKey(e.timestamp, this.tz);
+    let bucket = this.hourly.get(hk);
+    if (!bucket) {
+      bucket = newBucket();
+      this.hourly.set(hk, bucket);
     }
+    bucket.errorLogCount++;
 
     // Attribute channel failures (e.g. "channel error (channel #31, status code: 503)")
     const channelMatch = msg.match(/channel\s*#(\d+)/i);
@@ -317,11 +283,11 @@ export class MemoryStore implements IStore, Lifecycle {
     const bucketCutoff = now - retentionMs;
 
     for (const key of this.hourly.keys()) {
-      if (new Date(key).getTime() < bucketCutoff) this.hourly.delete(key);
+      if (hourKeyToEpochMs(key, this.tz) < bucketCutoff) this.hourly.delete(key);
     }
 
     // Keep daily cost for the maximum queryable window (90 days)
-    const dayCutoff = toDateString(new Date(now - 90 * 86_400_000));
+    const dayCutoff = toDateString(new Date(now - 90 * 86_400_000), this.tz);
     for (const key of this.dailyCost.keys()) {
       if (key < dayCutoff) this.dailyCost.delete(key);
     }
@@ -378,9 +344,12 @@ export class MemoryStore implements IStore, Lifecycle {
     let completionTokens = 0;
     let quota = 0;
     let cacheTokens = 0;
-    let totalTime = 0;
+    let ginDurationMs = 0;
+    let errorLogCount = 0;
     let frtSum = 0;
     let frtCount = 0;
+    let firstBucketMs: number | null = null;
+    let lastBucketMs: number | null = null;
     const models = new Set<string>();
     const channels = new Set<number>();
     const tokens = new Set<string>();
@@ -388,8 +357,10 @@ export class MemoryStore implements IStore, Lifecycle {
     const groups = new Set<string>();
 
     for (const [key, b] of this.hourly) {
-      const t = new Date(key).getTime();
+      const t = hourKeyToEpochMs(key, this.tz);
       if (t < startMs || t > endMs) continue;
+      if (firstBucketMs === null || t < firstBucketMs) firstBucketMs = t;
+      if (lastBucketMs === null || t > lastBucketMs) lastBucketMs = t;
       requests += b.requests;
       errors += b.errors;
       consumes += (b.consumes ?? 0);
@@ -399,7 +370,8 @@ export class MemoryStore implements IStore, Lifecycle {
       completionTokens += b.completionTokens;
       quota += b.quota;
       cacheTokens += b.cacheTokens;
-      totalTime += (b.totalTime ?? 0);
+      ginDurationMs += b.ginDurationMs;
+      errorLogCount += b.errorLogCount;
       frtSum += (b.frtSum ?? 0);
       frtCount += (b.frtCount ?? 0);
       for (const m of b.models) models.add(m);
@@ -417,7 +389,7 @@ export class MemoryStore implements IStore, Lifecycle {
       totalQuota: quota,
       totalCost: quota / QUOTA_PER_COST_UNIT,
       errorCount: errors,
-      errorLogCount: this.errorLogCount,
+      errorLogCount,
       errorRate: requests > 0 ? errors / requests : 0,
       cacheHitRate: promptTokens > 0 ? cacheTokens / promptTokens : 0,
       streamRatio: consumes > 0 ? streamCount / consumes : 0,
@@ -426,13 +398,15 @@ export class MemoryStore implements IStore, Lifecycle {
       activeChannels: channels.size,
       activeUsers: users.size,
       activeTokens: tokens.size,
-      activeIps: this.indexes.ip.size,
+      // IP activity in the window, from the IP dimension index (not global)
+      activeIps: this.indexes.ip.countActiveInRange(startMs, endMs),
       activeGroups: groups.size,
-      avgResponseTime: consumes > 0 ? totalTime / consumes : (requests > 0 ? this.totalGinDurationMs / this.ginTotal / 1000 : 0),
+      // GIN-duration caliber, same as the all-time summary
+      avgResponseTime: requests > 0 ? ginDurationMs / requests / 1000 : 0,
       avgFrt: frtCount > 0 ? frtSum / frtCount : 0,
       cacheHitTokens: cacheTokens,
-      firstEntry: startMs,
-      lastEntry: endMs,
+      firstEntry: firstBucketMs,
+      lastEntry: lastBucketMs,
       uptimeSeconds: process.uptime(),
     };
   }
@@ -445,7 +419,7 @@ export class MemoryStore implements IStore, Lifecycle {
 
     const result: TimelineBucket[] = [];
     const sorted = [...this.hourly.entries()]
-      .filter(([k]) => new Date(k) >= cutoff)
+      .filter(([k]) => hourKeyToEpochMs(k, this.tz) >= cutoff.getTime())
       .sort(([a], [b]) => a.localeCompare(b));
 
     for (const [time, b] of sorted) {
@@ -511,8 +485,12 @@ export class MemoryStore implements IStore, Lifecycle {
       const e = this.consumeEntries[i];
       const ts = e.timestamp.getTime();
 
+      // Entries are ingested in (mostly) chronological order, so scanning
+      // backwards allows early exit once timestamps fall below the range.
+      // 60s tolerance guards against minor out-of-order ingest at rotation.
+      if (filter.start !== undefined && ts < filter.start - 60_000) break;
+
       // Time range filter
-      if (filter.start !== undefined && ts < filter.start) continue;
       if (filter.end !== undefined && ts > filter.end) continue;
 
       if (filter.model && e.params.model_name !== filter.model) continue;
@@ -544,4 +522,12 @@ export class MemoryStore implements IStore, Lifecycle {
 
   getEntryCount(): number { return this.totalEntries; }
   getConsumeCount(): number { return this.consumeEntries.length; }
+
+  getDailyQuota(date: string): number {
+    return this.dailyCost.get(date)?.quota ?? 0;
+  }
+
+  getTokenTotals(): Array<{ name: string; quota: number; requests: number }> {
+    return this.indexes.token.toQuotaTotals();
+  }
 }

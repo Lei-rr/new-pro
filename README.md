@@ -36,6 +36,12 @@ LOG_PATH=/guolei/new-api/logs
 
 # 可选：设置访问密钥（多个用逗号分隔，留空表示不开启认证）
 API_KEYS=
+
+# 日志源服务器时区（'local' 或 IANA 时区名，如 Asia/Shanghai）
+LOG_TZ=local
+
+# CORS 允许来源（逗号分隔；留空 = 仅同源）
+CORS_ORIGINS=
 ```
 
 ### 2. 启动服务
@@ -45,6 +51,8 @@ docker compose up -d --build
 ```
 
 启动完成后，在浏览器中访问：**`http://localhost:3600`** 即可使用。
+
+> **API 约定**：REST 接口挂载在 `/api/v1/*`（旧 `/api/*` 前缀保留兼容）；健康探针 `/api/v1/health/live`（存活）与 `/api/v1/health/ready`（就绪，历史日志加载完成前返回 503）；Prometheus 指标 `/api/v1/metrics`；WebSocket 入口 `/ws`（API Key 优先通过子协议 `api_key.<token>` 传递）。摄入进度持久化在 `CHECKPOINT_PATH`（默认 `./data/checkpoint.json`，容器内为 `/app/data` 卷），重启后增量恢复，不再全量重放历史日志。
 
 ---
 

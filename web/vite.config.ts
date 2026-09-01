@@ -17,4 +17,14 @@ export default defineConfig({
       '/ws': { target: 'ws://localhost:3600', ws: true },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ['echarts', 'vue-echarts'],
+          vue: ['vue', 'vue-router', 'pinia'],
+        },
+      },
+    },
+  },
 });

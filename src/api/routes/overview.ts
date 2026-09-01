@@ -1,25 +1,27 @@
-import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import type { ApiApp } from '../app-type.js';
 import type { IStore } from '../../store/interface.js';
 
-export function registerOverviewRoutes(app: FastifyInstance, store: IStore): void {
-  app.get<{
-    Querystring: { start?: string; end?: string };
-  }>('/api/overview/summary', async (request) => {
-    const start = request.query.start ? Number(request.query.start) : undefined;
-    const end = request.query.end ? Number(request.query.end) : undefined;
-    return store.getSummary(
-      Number.isFinite(start) ? start : undefined,
-      Number.isFinite(end) ? end : undefined,
-    );
+const epochMs = z.string().regex(/^\d+$/).transform(Number);
+
+const summaryQuery = z.object({
+  start: epochMs.optional(),
+  end: epochMs.optional(),
+});
+
+const timelineQuery = z.object({
+  hours: epochMs.optional(),
+});
+
+export function registerOverviewRoutes(app: ApiApp, store: IStore): void {
+  app.get('/overview/summary', { schema: { querystring: summaryQuery } }, async (request) => {
+    const { start, end } = request.query;
+    return store.getSummary(start, end);
   });
 
-  app.get<{
-    Querystring: { hours?: string };
-  }>('/api/overview/timeline', async (request) => {
-    const hours = Math.min(
-      parseInt(request.query.hours ?? '24', 10) || 24,
-      168, // max 7 days
-    );
+  app.get('/overview/timeline', { schema: { querystring: timelineQuery } }, async (request) => {
+    const raw = request.query.hours ?? 24;
+    const hours = Math.min(raw > 0 ? raw : 24, 168); // max 7 days
     return store.getTimeline(hours);
   });
 }

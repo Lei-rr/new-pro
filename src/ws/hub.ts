@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import type { WebSocket } from 'ws';
+import { z } from 'zod';
 import type { Lifecycle } from '../core/container.js';
 import { createLogger } from '../core/logger.js';
 import { EventBus } from '../core/event-bus.js';
@@ -15,13 +16,16 @@ const log = createLogger('ws');
 /** Upper bound for the pending log buffer (protects against ingest bursts). */
 const MAX_BUFFERED_LOGS = 5000;
 
+/** Validated client-side log filter message. */
+const wsFilterSchema = z.object({
+  models: z.array(z.string()).optional(),
+  channels: z.array(z.number().int()).optional(),
+  users: z.array(z.number().int()).optional(),
+});
+
 interface WsClient {
   socket: WebSocket;
-  filters?: {
-    models?: string[];
-    channels?: number[];
-    users?: number[];
-  };
+  filters?: z.infer<typeof wsFilterSchema>;
 }
 
 /**
@@ -33,15 +37,12 @@ export class WsHub implements Lifecycle {
   private logBuffer: ParsedLogEntry[] = [];
   private statsTimer: ReturnType<typeof setInterval> | null = null;
   private logsTimer: ReturnType<typeof setInterval> | null = null;
-  private bus: EventBus;
 
   constructor(
     private store: IStore,
     private engine: AnalysisEngine,
-    bus?: EventBus,
-  ) {
-    this.bus = bus ?? EventBus.getInstance();
-  }
+    private bus: EventBus,
+  ) {}
 
   // Bound handler so on/off reference equality holds
   private onEntry = (entry: ParsedLogEntry): void => {
@@ -73,9 +74,14 @@ export class WsHub implements Lifecycle {
       // Handle client messages
       socket.on('message', (raw: unknown) => {
         try {
-          const msg = JSON.parse(String(raw));
+          const msg = JSON.parse(String(raw)) as { type?: string; data?: unknown };
           if (msg.type === 'filter' && msg.data) {
-            client.filters = msg.data;
+            const parsed = wsFilterSchema.safeParse(msg.data);
+            if (parsed.success) {
+              client.filters = parsed.data;
+            } else {
+              log.debug({ err: parsed.error.issues }, 'Ignoring invalid WS filter');
+            }
           }
         } catch {
           // Ignore invalid messages

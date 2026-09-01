@@ -1,6 +1,6 @@
 import IP2Region from 'ip2region';
 
-let queryInstance: any = null;
+let queryInstance: IP2Region | null = null;
 const cache = new Map<string, string>();
 
 /**
@@ -16,8 +16,7 @@ export function getIpLocation(ip?: string | null): string {
 
   try {
     if (!queryInstance) {
-      const Mod: any = IP2Region;
-      queryInstance = typeof Mod.default === 'function' ? new Mod.default() : new Mod();
+      queryInstance = new IP2Region();
     }
 
     const res = queryInstance.search(ip);

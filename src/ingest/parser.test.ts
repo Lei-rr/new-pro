@@ -23,6 +23,21 @@ describe('parseLine', () => {
     expect(entry.timestamp.getSeconds()).toBe(47);
   });
 
+  it('parses timestamps in a configurable source timezone (LOG_TZ)', () => {
+    const entry = parseLine(CONSUME_LINE, 'oneapi-2026-08-27.log', 'Asia/Shanghai');
+    expect(entry).not.toBeNull();
+    if (!entry || !isConsume(entry)) throw new Error('expected consume entry');
+    // 09:11:47 +08:00 == 01:11:47 UTC
+    expect(entry.timestamp.toISOString()).toBe('2026-08-27T01:11:47.000Z');
+  });
+
+  it('parses timestamps with explicit UTC source timezone', () => {
+    const entry = parseLine(CONSUME_LINE, 'oneapi-2026-08-27.log', 'UTC');
+    expect(entry).not.toBeNull();
+    if (!entry || !isConsume(entry)) throw new Error('expected consume entry');
+    expect(entry.timestamp.toISOString()).toBe('2026-08-27T09:11:47.000Z');
+  });
+
   it('parses GIN lines', () => {
     const entry = parseLine(GIN_LINE, 'oneapi-2026-08-27.log');
     expect(entry).not.toBeNull();

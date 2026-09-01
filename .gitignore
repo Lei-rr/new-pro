@@ -7,6 +7,9 @@ dist
 web/dist
 web/node_modules
 
+# Runtime data (ingest checkpoint)
+data/
+
 # Logs & Runtime files
 *.log
 backend.log

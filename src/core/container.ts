@@ -14,30 +14,16 @@ export interface Lifecycle {
 }
 
 /**
- * Lightweight service container.
- * Manages service registration, retrieval, and lifecycle.
+ * Lightweight service lifecycle manager.
+ * Services are registered at bootstrap; started in order, stopped in reverse.
  */
 export class Container {
-  private services = new Map<string, unknown>();
   private lifecycles: { name: string; service: Lifecycle }[] = [];
 
-  register<T>(name: string, service: T): void {
-    this.services.set(name, service);
-    if (this.isLifecycle(service)) {
+  register(name: string, service: unknown): void {
+    if (isLifecycle(service)) {
       this.lifecycles.push({ name, service });
     }
-  }
-
-  get<T>(name: string): T {
-    const service = this.services.get(name);
-    if (!service) {
-      throw new Error(`Service "${name}" not registered`);
-    }
-    return service as T;
-  }
-
-  has(name: string): boolean {
-    return this.services.has(name);
   }
 
   async startAll(): Promise<void> {
@@ -55,15 +41,15 @@ export class Container {
       }
     }
   }
+}
 
-  private isLifecycle(obj: unknown): obj is Lifecycle {
-    return (
-      typeof obj === 'object' &&
-      obj !== null &&
-      'start' in obj &&
-      'stop' in obj &&
-      typeof (obj as Lifecycle).start === 'function' &&
-      typeof (obj as Lifecycle).stop === 'function'
-    );
-  }
+function isLifecycle(obj: unknown): obj is Lifecycle {
+  return (
+    typeof obj === 'object' &&
+    obj !== null &&
+    'start' in obj &&
+    'stop' in obj &&
+    typeof (obj as Lifecycle).start === 'function' &&
+    typeof (obj as Lifecycle).stop === 'function'
+  );
 }

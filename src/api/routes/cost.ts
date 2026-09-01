@@ -1,13 +1,20 @@
-import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import type { ApiApp } from '../app-type.js';
 import type { IStore } from '../../store/interface.js';
 import type { AnalysisEngine } from '../../engine/registry.js';
 
+const num = z.string().regex(/^\d+$/).transform(Number);
+
+const trendQuery = z.object({
+  days: num.optional(),
+});
+
 export function registerCostRoutes(
-  app: FastifyInstance,
+  app: ApiApp,
   store: IStore,
   engine: AnalysisEngine,
 ): void {
-  app.get('/api/cost/summary', async () => {
+  app.get('/cost/summary', async () => {
     const summary = store.getSummary();
     const costPlugin = engine.getPlugin('cost');
     return {
@@ -22,13 +29,9 @@ export function registerCostRoutes(
     };
   });
 
-  app.get<{
-    Querystring: { days?: string };
-  }>('/api/cost/trend', async (request) => {
-    const days = Math.min(
-      parseInt(request.query.days ?? '7', 10) || 7,
-      90,
-    );
+  app.get('/cost/trend', { schema: { querystring: trendQuery } }, async (request) => {
+    const raw = request.query.days ?? 7;
+    const days = Math.min(raw > 0 ? raw : 7, 90);
     return store.getCostTrend(days);
   });
 }

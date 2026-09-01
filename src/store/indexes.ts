@@ -1,6 +1,6 @@
 import type { ConsumeLogEntry } from '../types/log.js';
 import type { DimensionStats, DimensionQuery } from '../types/stats.js';
-import { QUOTA_PER_COST_UNIT } from '../utils/format.js';
+import { QUOTA_PER_COST_UNIT } from '../constants.js';
 import { getIpLocation } from '../utils/geo.js';
 
 /**
@@ -101,6 +101,46 @@ export class DimensionIndex {
     if (ts > acc.lastSeen) acc.lastSeen = ts;
   }
 
+  /**
+   * Attach consume details (tokens/quota) to a raw request record without
+   * counting a second request. For the IP dimension the request count and
+   * response time come from ingestIpRequest (GIN), so each relay request
+   * is counted exactly once.
+   */
+  addConsumeParams(key: string, entry: ConsumeLogEntry): void {
+    if (!key) return;
+    const ts = entry.timestamp.getTime();
+    let acc = this.data.get(key);
+    if (!acc) {
+      acc = newAccum(ts);
+      this.data.set(key, acc);
+    }
+
+    const p = entry.params;
+    acc.promptTokens += p.prompt_tokens;
+    acc.completionTokens += p.completion_tokens;
+    acc.quota += p.quota;
+    acc.cacheTokens += p.other?.cache_tokens ?? 0;
+
+    const frt = p.other?.frt ?? -1;
+    if (frt > 0) {
+      acc.totalFrt += frt;
+      acc.frtCount++;
+    }
+
+    if (ts < acc.firstSeen) acc.firstSeen = ts;
+    if (ts > acc.lastSeen) acc.lastSeen = ts;
+  }
+
+  /** Number of distinct keys active within [startMs, endMs]. */
+  countActiveInRange(startMs: number, endMs: number): number {
+    let count = 0;
+    for (const acc of this.data.values()) {
+      if (acc.lastSeen >= startMs && acc.firstSeen <= endMs) count++;
+    }
+    return count;
+  }
+
   /** Increment error count for a key */
   addError(key: string, ts: number): void {
     if (!key) return;
@@ -113,7 +153,11 @@ export class DimensionIndex {
     if (ts > acc.lastSeen) acc.lastSeen = ts;
   }
 
-  /** Record a raw request (GIN relay) against a key without consume params. */
+  /**
+   * Record a raw HTTP request (GIN relay) against a key. This is the single
+   * source of the request count and response time (GIN duration). Consume
+   * params attach later via addConsumeParams without re-counting.
+   */
   ingestIpRequest(key: string, durationMs: number, ts: number): void {
     if (!key) return;
     let acc = this.data.get(key);
@@ -159,5 +203,14 @@ export class DimensionIndex {
   /** Total unique keys */
   get size(): number {
     return this.data.size;
+  }
+
+  /** Raw per-key quota/request totals (for alert rules that scan all keys). */
+  toQuotaTotals(): Array<{ name: string; quota: number; requests: number }> {
+    const out: Array<{ name: string; quota: number; requests: number }> = [];
+    for (const [key, acc] of this.data) {
+      out.push({ name: key, quota: acc.quota, requests: acc.requests });
+    }
+    return out;
   }
 }

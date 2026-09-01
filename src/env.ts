@@ -10,8 +10,35 @@ const envSchema = z.object({
   LOG_DIR: z.string().default('/logs'),
   LOG_PATTERN: z.string().default('*.log'),
 
+  // Timezone of the log source server (NewAPI writes naive wall-clock
+  // timestamps). 'local' = same timezone as this process; otherwise an
+  // IANA name (e.g. 'Asia/Shanghai', 'UTC').
+  LOG_TZ: z
+    .string()
+    .default('local')
+    .refine((tz) => {
+      if (tz === 'local') return true;
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: tz });
+        return true;
+      } catch {
+        return false;
+      }
+    }, 'LOG_TZ must be "local" or a valid IANA timezone (e.g. "Asia/Shanghai", "UTC")'),
+
   // Auth: comma-separated API keys. Empty = auth disabled.
   API_KEYS: z.string().default(''),
+
+  // CORS: comma-separated allowed origins. Empty = same-origin only.
+  CORS_ORIGINS: z.string().default(''),
+
+  // Per-IP HTTP rate limit: max requests per window (0 = disabled).
+  RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(600),
+  RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
+
+  // Ingest resume checkpoint (file offsets persisted across restarts)
+  CHECKPOINT_PATH: z.string().default('./data/checkpoint.json'),
+  CHECKPOINT_INTERVAL_MS: z.coerce.number().int().min(1000).default(30_000),
 
   MAX_ENTRIES: z.coerce.number().default(500_000),
   RETENTION_HOURS: z.coerce.number().default(72),

@@ -1,9 +1,28 @@
-import type { FastifyInstance } from 'fastify';
+import { z } from 'zod';
+import type { ApiApp } from '../app-type.js';
 import type { IStore } from '../../store/interface.js';
 import type { ConsumeLogEntry } from '../../types/log.js';
 import { isConsume } from '../../types/log.js';
-import { QUOTA_PER_COST_UNIT } from '../../utils/format.js';
+import { QUOTA_PER_COST_UNIT } from '../../constants.js';
 import { getIpLocation } from '../../utils/geo.js';
+
+const num = z.string().regex(/^\d+$/).transform(Number);
+const epochMs = z.string().regex(/^\d+$/).transform(Number);
+
+const paginationQuery = z.object({
+  limit: num.optional(),
+  offset: num.optional(),
+});
+
+const searchQuery = paginationQuery.extend({
+  q: z.string().optional(),
+  model: z.string().optional(),
+  user: z.string().optional(),
+  channel: z.string().optional(),
+  ip: z.string().optional(),
+  start: epochMs.optional(),
+  end: epochMs.optional(),
+});
 
 /** Flatten a consume entry for API response */
 function formatConsume(e: ConsumeLogEntry) {
@@ -43,12 +62,10 @@ function formatConsume(e: ConsumeLogEntry) {
   };
 }
 
-export function registerLogRoutes(app: FastifyInstance, store: IStore): void {
-  app.get<{
-    Querystring: { limit?: string; offset?: string };
-  }>('/api/logs/recent', async (request) => {
-    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '50', 10) || 50), 500);
-    const offset = Math.max(0, parseInt(request.query.offset ?? '0', 10) || 0);
+export function registerLogRoutes(app: ApiApp, store: IStore): void {
+  app.get('/logs/recent', { schema: { querystring: paginationQuery } }, async (request) => {
+    const limit = Math.min(Math.max(1, request.query.limit ?? 50), 500);
+    const offset = Math.max(0, request.query.offset ?? 0);
     const res = store.getRecentConsumeLogs(limit, offset);
     return {
       total: res.total,
@@ -59,32 +76,19 @@ export function registerLogRoutes(app: FastifyInstance, store: IStore): void {
     };
   });
 
-  app.get<{
-    Querystring: {
-      q?: string;
-      model?: string;
-      user?: string;
-      channel?: string;
-      ip?: string;
-      start?: string;
-      end?: string;
-      limit?: string;
-      offset?: string;
-    };
-  }>('/api/logs/search', async (request) => {
-    const limit = Math.min(Math.max(1, parseInt(request.query.limit ?? '50', 10) || 50), 500);
-    const offset = Math.max(0, parseInt(request.query.offset ?? '0', 10) || 0);
-    const start = request.query.start ? Number(request.query.start) || undefined : undefined;
-    const end = request.query.end ? Number(request.query.end) || undefined : undefined;
+  app.get('/logs/search', { schema: { querystring: searchQuery } }, async (request) => {
+    const q = request.query;
+    const limit = Math.min(Math.max(1, q.limit ?? 50), 500);
+    const offset = Math.max(0, q.offset ?? 0);
 
     const res = store.searchLogs({
-      q: request.query.q,
-      model: request.query.model,
-      user: request.query.user,
-      channel: request.query.channel,
-      ip: request.query.ip,
-      start,
-      end,
+      q: q.q,
+      model: q.model,
+      user: q.user,
+      channel: q.channel,
+      ip: q.ip,
+      start: q.start,
+      end: q.end,
       limit,
       offset,
     });

@@ -7,6 +7,7 @@ import type {
   ErrorLogEntry,
   ConsumeParams,
 } from '../types/log.js';
+import { wallClockToEpochMs } from '../utils/time.js';
 
 // ─── Regex patterns ───
 
@@ -26,13 +27,17 @@ const ERR_RE =
 
 // ─── Helpers ───
 
-function parseTimestamp(ts: string): Date {
-  // Naive local log timestamp ("2026/08/27 - 09:11:47").
-  // Logs are written in server-local time (no timezone), parse components
-  // as local time so instants match wall-clock shown in the log file.
+function parseTimestamp(ts: string, tz: string): Date {
+  // Naive log timestamp ("2026/08/27 - 09:11:47") written by the log source
+  // in its own timezone. The resulting Date is a correct UTC instant:
+  // - tz === 'local': source shares this process's timezone.
+  // - otherwise: wall-clock components are resolved against the given IANA zone.
   const m = /^(\d{4})\/(\d{2})\/(\d{2})\s+-\s+(\d{2}):(\d{2}):(\d{2})$/.exec(ts.trim());
   if (m) {
-    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    if (tz === 'local') {
+      return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+    }
+    return new Date(wallClockToEpochMs(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], tz));
   }
   return new Date(ts.replace(' - ', ' ').replace(/\//g, '-'));
 }
@@ -52,8 +57,9 @@ function parseDurationMs(dur: string): number {
 /**
  * Parse a single log line into a typed entry.
  * Returns null for unparseable or empty lines.
+ * `tz` is the log source timezone ('local' by default).
  */
-export function parseLine(line: string, sourceFile: string): ParsedLogEntry | null {
+export function parseLine(line: string, sourceFile: string, tz = 'local'): ParsedLogEntry | null {
   const trimmed = line.trim();
   if (!trimmed || trimmed[0] !== '[') return null;
 
@@ -67,7 +73,7 @@ export function parseLine(line: string, sourceFile: string): ParsedLogEntry | nu
       return {
         level: 'INFO',
         kind: 'consume',
-        timestamp: parseTimestamp(m[1]),
+        timestamp: parseTimestamp(m[1], tz),
         requestId: m[2],
         userId: parseInt(m[3], 10),
         params,
@@ -83,7 +89,7 @@ export function parseLine(line: string, sourceFile: string): ParsedLogEntry | nu
   if (m) {
     return {
       level: 'GIN',
-      timestamp: parseTimestamp(m[1]),
+      timestamp: parseTimestamp(m[1], tz),
       routeType: m[2],
       requestId: m[3],
       statusCode: parseInt(m[4], 10),
@@ -101,7 +107,7 @@ export function parseLine(line: string, sourceFile: string): ParsedLogEntry | nu
   if (m) {
     return {
       level: 'SYS',
-      timestamp: parseTimestamp(m[1]),
+      timestamp: parseTimestamp(m[1], tz),
       message: m[2].trim(),
       sourceFile,
     } satisfies SysLogEntry;
@@ -112,7 +118,7 @@ export function parseLine(line: string, sourceFile: string): ParsedLogEntry | nu
   if (m) {
     return {
       level: 'ERR',
-      timestamp: parseTimestamp(m[1]),
+      timestamp: parseTimestamp(m[1], tz),
       requestId: m[2],
       message: m[3].trim(),
       sourceFile,
@@ -125,7 +131,7 @@ export function parseLine(line: string, sourceFile: string): ParsedLogEntry | nu
     return {
       level: 'INFO',
       kind: 'info',
-      timestamp: parseTimestamp(m[1]),
+      timestamp: parseTimestamp(m[1], tz),
       requestId: m[2],
       message: m[3].trim(),
       sourceFile,
@@ -138,11 +144,11 @@ export function parseLine(line: string, sourceFile: string): ParsedLogEntry | nu
 /**
  * Parse multiple lines at once (for file reads).
  */
-export function parseLines(text: string, sourceFile: string): ParsedLogEntry[] {
+export function parseLines(text: string, sourceFile: string, tz = 'local'): ParsedLogEntry[] {
   const entries: ParsedLogEntry[] = [];
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i++) {
-    const entry = parseLine(lines[i], sourceFile);
+    const entry = parseLine(lines[i], sourceFile, tz);
     if (entry) entries.push(entry);
   }
   return entries;

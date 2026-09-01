@@ -1,8 +1,16 @@
 import type { AnalysisPlugin } from '../plugin.js';
 import type { ParsedLogEntry } from '../../types/log.js';
-import { isConsume, isGin, isError } from '../../types/log.js';
+import { isConsume, isGin } from '../../types/log.js';
 import type { Alert } from '../../types/stats.js';
-import { QUOTA_PER_COST_UNIT } from '../../utils/format.js';
+import { getEnv } from '../../env.js';
+import { QUOTA_PER_COST_UNIT } from '../../constants.js';
+
+/** Sliding window for cancellation surge detection. */
+const CLIENT_GONE_WINDOW_MS = 60 * 60 * 1000;
+/** Min cancellations within the window to fire the surge alert. */
+const CLIENT_GONE_SURGE_THRESHOLD = 50;
+/** How often the full IP profile map is pruned. */
+const IP_PROFILE_PRUNE_INTERVAL_MS = 5 * 60_000;
 
 export interface IpAbuseProfile {
   ip: string;
@@ -34,9 +42,10 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
   readonly name = 'abuse-detection';
 
   private ipProfiles = new Map<string, IpAbuseProfile>();
-  private clientGoneCount = 0;
-  private clientGoneLastSeen = 0;
+  private clientGoneTimes: number[] = [];
   private whaleRecords: WhaleRecord[] = [];
+  private dirtyIps = new Set<string>();
+  private lastIpPrune = 0;
 
   ingest(entry: ParsedLogEntry): void {
     const ts = entry.timestamp.getTime();
@@ -61,6 +70,9 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
       profile.totalRequests++;
       if (ts > profile.lastSeen) profile.lastSeen = ts;
 
+      // Mark dirty so checkAlerts only rescans IPs with new activity
+      this.dirtyIps.add(ip);
+
       if (entry.statusCode >= 400) {
         profile.errorCount++;
         profile.statusCodes.set(
@@ -71,13 +83,11 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
     }
 
     // 2. Cancellation spike
+    // Single source of truth: the consume record's stream_status.end_reason.
+    // ERR lines containing "client_gone" describe the same logical event and
+    // must not be counted a second time.
     if (isConsume(entry) && entry.params.other?.stream_status?.end_reason === 'client_gone') {
-      this.clientGoneCount++;
-      this.clientGoneLastSeen = ts;
-    }
-    if (isError(entry) && entry.message.includes('client_gone')) {
-      this.clientGoneCount++;
-      this.clientGoneLastSeen = ts;
+      this.clientGoneTimes.push(ts);
     }
 
     // 3. Giant single request detection (Cost >= $1.0 or Prompt tokens >= 100k)
@@ -110,11 +120,35 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
     }
   }
 
+  private pruneClientGone(now: number): void {
+    const cutoff = now - CLIENT_GONE_WINDOW_MS;
+    let i = 0;
+    while (i < this.clientGoneTimes.length && this.clientGoneTimes[i] <= cutoff) i++;
+    if (i > 0) this.clientGoneTimes.splice(0, i);
+  }
+
+  /** Drop IP profiles inactive for longer than the store retention window. */
+  private pruneIpProfiles(now: number): void {
+    if (now - this.lastIpPrune < IP_PROFILE_PRUNE_INTERVAL_MS) return;
+    this.lastIpPrune = now;
+    const cutoff = now - Math.max(getEnv().RETENTION_HOURS, 1) * 3_600_000;
+    for (const [ip, profile] of this.ipProfiles) {
+      if (profile.lastSeen < cutoff) {
+        this.ipProfiles.delete(ip);
+        this.dirtyIps.delete(ip);
+      }
+    }
+  }
+
   checkAlerts(): Alert[] {
     const alerts: Alert[] = [];
+    const now = Date.now();
+    this.pruneIpProfiles(now);
 
-    // 1. IP Probing / Anti-Abuse detection
-    for (const [ip, p] of this.ipProfiles) {
+    // 1. IP Probing / Anti-Abuse detection (incremental: only dirty IPs)
+    for (const ip of this.dirtyIps) {
+      const p = this.ipProfiles.get(ip);
+      if (!p) continue;
       if (p.errorCount >= 10) {
         const errorRate = p.totalRequests > 0 ? p.errorCount / p.totalRequests : 0;
         const isCritical = p.errorCount >= 100 || (p.errorCount >= 20 && errorRate > 0.7);
@@ -140,16 +174,21 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
         });
       }
     }
+    this.dirtyIps.clear();
 
-    // 2. Cancellation surge
-    if (this.clientGoneCount >= 50) {
+    // 2. Cancellation surge (rolling window, resets automatically)
+    this.pruneClientGone(now);
+    if (this.clientGoneTimes.length >= CLIENT_GONE_SURGE_THRESHOLD) {
       alerts.push({
         id: 'client-cancel-surge',
         ruleId: 'cancellation-surge',
         severity: 'warning',
-        message: `检测到客户端超时主动中断突增（累计 ${this.clientGoneCount} 次 client_gone），请关注上游模型首字响应耗时与网络延迟。`,
-        timestamp: this.clientGoneLastSeen || Date.now(),
-        details: { totalCancels: this.clientGoneCount },
+        message: `检测到客户端超时主动中断突增（最近 60 分钟内 ${this.clientGoneTimes.length} 次 client_gone），请关注上游模型首字响应耗时与网络延迟。`,
+        timestamp: this.clientGoneTimes[this.clientGoneTimes.length - 1] ?? now,
+        details: {
+          windowMinutes: CLIENT_GONE_WINDOW_MS / 60_000,
+          totalCancels: this.clientGoneTimes.length,
+        },
       });
     }
 
@@ -178,6 +217,9 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
   }
 
   getSummary(): Record<string, unknown> {
+    const now = Date.now();
+    this.pruneClientGone(now);
+
     const highRiskIps = [...this.ipProfiles.values()]
       .filter((p) => p.errorCount >= 5)
       .sort((a, b) => b.errorCount - a.errorCount)
@@ -193,7 +235,7 @@ export class AbuseDetectionPlugin implements AnalysisPlugin {
 
     return {
       highRiskIps,
-      clientGoneCount: this.clientGoneCount,
+      clientGoneCount: this.clientGoneTimes.length,
       whaleRecords: this.whaleRecords.slice(-20).reverse(),
     };
   }

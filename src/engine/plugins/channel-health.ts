@@ -26,6 +26,8 @@ export class ChannelHealthPlugin implements AnalysisPlugin {
 
   private channels = new Map<string, ChannelStat>();
   private modelExhaustions = new Map<string, ModelExhaustionStat>();
+  private dirtyChannels = new Set<string>();
+  private dirtyModels = new Set<string>();
 
   ingest(entry: ParsedLogEntry): void {
     const ts = entry.timestamp.getTime();
@@ -50,6 +52,7 @@ export class ChannelHealthPlugin implements AnalysisPlugin {
         }
         stat.totalFailures++;
         if (ts > stat.lastSeen) stat.lastSeen = ts;
+        this.dirtyChannels.add(chId);
 
         const codeMatch = msg.match(/status\s*code:?\s*(\d+)/i);
         if (codeMatch) {
@@ -80,6 +83,7 @@ export class ChannelHealthPlugin implements AnalysisPlugin {
         mStat.count++;
         mStat.groups.add(group);
         if (ts > mStat.lastSeen) mStat.lastSeen = ts;
+        this.dirtyModels.add(model);
       }
     }
   }
@@ -87,8 +91,10 @@ export class ChannelHealthPlugin implements AnalysisPlugin {
   checkAlerts(): Alert[] {
     const alerts: Alert[] = [];
 
-    // 1. Channel outages
-    for (const [chId, stat] of this.channels) {
+    // 1. Channel outages (incremental: only channels with new failures)
+    for (const chId of this.dirtyChannels) {
+      const stat = this.channels.get(chId);
+      if (!stat) continue;
       if (stat.totalFailures >= 10) {
         const isCritical = stat.totalFailures >= 100;
         const codeStr = [...stat.statusCodes.entries()]
@@ -113,9 +119,12 @@ export class ChannelHealthPlugin implements AnalysisPlugin {
         });
       }
     }
+    this.dirtyChannels.clear();
 
-    // 2. Model exhaustions
-    for (const [model, mStat] of this.modelExhaustions) {
+    // 2. Model exhaustions (incremental: only models with new failures)
+    for (const model of this.dirtyModels) {
+      const mStat = this.modelExhaustions.get(model);
+      if (!mStat) continue;
       if (mStat.count >= 5) {
         const groups = [...mStat.groups].join(', ');
         alerts.push({
@@ -133,6 +142,7 @@ export class ChannelHealthPlugin implements AnalysisPlugin {
         });
       }
     }
+    this.dirtyModels.clear();
 
     return alerts;
   }

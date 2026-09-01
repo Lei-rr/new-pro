@@ -1,21 +1,41 @@
-import type { FastifyInstance } from 'fastify';
-import type { IStore } from '../../store/interface.js';
+import type { ApiApp } from '../app-type.js';
 import type { AnalysisEngine } from '../../engine/registry.js';
 import { getIpLocation } from '../../utils/geo.js';
 
+interface HighRiskIpSummary {
+  ip: string;
+  totalRequests: number;
+  errorCount: number;
+  errorRate: string;
+  lastSeen: number;
+  firstSeen: number;
+}
+
+interface WhaleRecordSummary {
+  requestId: string;
+  timestamp: number;
+  model: string;
+  userId: number;
+  ip: string | null;
+  tokenName: string;
+  cost: string | number;
+  quota: number;
+  promptTokens: number;
+  completionTokens: number;
+}
+
 export function registerAlertRoutes(
-  app: FastifyInstance,
-  _store: IStore,
+  app: ApiApp,
   engine: AnalysisEngine,
 ): void {
-  app.get('/api/alerts', async () => {
+  app.get('/alerts', async () => {
     const alerts = engine.checkAlerts().map((a) => {
       if (a.details && typeof a.details.ip === 'string') {
         return {
           ...a,
           details: {
             ...a.details,
-            location: getIpLocation(a.details.ip as string),
+            location: getIpLocation(a.details.ip),
           },
         };
       }
@@ -23,24 +43,20 @@ export function registerAlertRoutes(
     });
 
     const summaries = engine.getAllSummaries();
+    const abuse = summaries['abuse-detection'];
 
-    // Attach IP locations to abuse highRiskIps
-    if (summaries['abuse-detection'] && Array.isArray((summaries['abuse-detection'] as any).highRiskIps)) {
-      (summaries['abuse-detection'] as any).highRiskIps = (summaries['abuse-detection'] as any).highRiskIps.map(
-        (item: any) => ({
-          ...item,
-          location: getIpLocation(item.ip),
-        }),
-      );
+    if (abuse && Array.isArray(abuse.highRiskIps)) {
+      abuse.highRiskIps = (abuse.highRiskIps as HighRiskIpSummary[]).map((item) => ({
+        ...item,
+        location: getIpLocation(item.ip),
+      }));
     }
 
-    if (summaries['abuse-detection'] && Array.isArray((summaries['abuse-detection'] as any).whaleRecords)) {
-      (summaries['abuse-detection'] as any).whaleRecords = (summaries['abuse-detection'] as any).whaleRecords.map(
-        (item: any) => ({
-          ...item,
-          ipLocation: getIpLocation(item.ip),
-        }),
-      );
+    if (abuse && Array.isArray(abuse.whaleRecords)) {
+      abuse.whaleRecords = (abuse.whaleRecords as WhaleRecordSummary[]).map((item) => ({
+        ...item,
+        ipLocation: getIpLocation(item.ip),
+      }));
     }
 
     return {

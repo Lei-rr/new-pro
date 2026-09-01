@@ -31,3 +31,8 @@ export function wsUrl(): string {
   if (API_KEY) url.searchParams.set('api_key', API_KEY);
   return url.toString();
 }
+
+/** WebSocket subprotocols carrying the API key (kept out of the URL/access logs). */
+export function wsProtocols(): string[] {
+  return API_KEY ? [`api_key.${API_KEY}`] : [];
+}

@@ -1,39 +1,38 @@
 import type { AnalysisPlugin } from '../plugin.js';
-import type { ParsedLogEntry } from '../../types/log.js';
-import { isConsume } from '../../types/log.js';
 import type { Alert } from '../../types/stats.js';
+import type { IStore } from '../../store/interface.js';
 import { getEnv } from '../../env.js';
-import { QUOTA_PER_COST_UNIT } from '../../utils/format.js';
+import { QUOTA_PER_COST_UNIT } from '../../constants.js';
 
 /**
  * Per-token (API key) usage tracking and abuse detection.
+ *
+ * Token aggregations live in the store's token dimension index; this plugin
+ * only evaluates the quota threshold against them.
  */
 export class TokenPlugin implements AnalysisPlugin {
   readonly name = 'token';
 
-  private tokenQuota = new Map<string, number>();
-  private tokenRequests = new Map<string, number>();
+  private store: IStore | null = null;
 
-  ingest(entry: ParsedLogEntry): void {
-    if (!isConsume(entry)) return;
-    const name = entry.params.token_name;
-    this.tokenQuota.set(name, (this.tokenQuota.get(name) ?? 0) + entry.params.quota);
-    this.tokenRequests.set(name, (this.tokenRequests.get(name) ?? 0) + 1);
+  bindStore(store: IStore): void {
+    this.store = store;
   }
 
   checkAlerts(): Alert[] {
+    if (!this.store) return [];
     const threshold = getEnv().ALERT_QUOTA_THRESHOLD;
     const alerts: Alert[] = [];
 
-    for (const [name, quota] of this.tokenQuota) {
-      if (quota > threshold) {
+    for (const t of this.store.getTokenTotals()) {
+      if (t.quota > threshold) {
         alerts.push({
-          id: `token-quota-${name}`,
+          id: `token-quota-${t.name}`,
           ruleId: 'token-high-quota',
           severity: 'warning',
-          message: `Token "${name}" has consumed ${(quota / QUOTA_PER_COST_UNIT).toFixed(2)} total quota`,
+          message: `Token "${t.name}" has consumed ${(t.quota / QUOTA_PER_COST_UNIT).toFixed(2)} total quota`,
           timestamp: Date.now(),
-          details: { token: name, quota, cost: quota / QUOTA_PER_COST_UNIT },
+          details: { token: t.name, quota: t.quota, cost: t.quota / QUOTA_PER_COST_UNIT },
         });
       }
     }
@@ -42,17 +41,21 @@ export class TokenPlugin implements AnalysisPlugin {
   }
 
   getSummary(): Record<string, unknown> {
+    if (!this.store) return {};
+    const totals = this.store.getTokenTotals();
+    const top = [...totals]
+      .sort((a, b) => b.quota - a.quota)
+      .slice(0, 10)
+      .map((t) => ({
+        name: t.name,
+        quota: t.quota,
+        cost: t.quota / QUOTA_PER_COST_UNIT,
+        requests: t.requests,
+      }));
+
     return {
-      totalTokens: this.tokenQuota.size,
-      topByQuota: [...this.tokenQuota.entries()]
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 10)
-        .map(([name, quota]) => ({
-          name,
-          quota,
-          cost: quota / QUOTA_PER_COST_UNIT,
-          requests: this.tokenRequests.get(name) ?? 0,
-        })),
+      totalTokens: totals.length,
+      topByQuota: top,
     };
   }
 }
