@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue';
-import { ChevronLeft, ChevronRight } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from '@lucide/vue';
 import type { EChartsCoreOption } from 'echarts/core';
 import { useDimensionsStore } from '@/stores/dimensions';
 import { useAppStore } from '@/stores/app';
@@ -13,14 +13,13 @@ const app = useAppStore();
 
 onMounted(() => store.load());
 
-watch(() => app.rangeHours, () => store.load());
+watch(() => app.rangeDays, () => store.load());
 
 const DIMENSIONS = [
   { value: 'model', label: '模型' },
   { value: 'channel', label: '渠道' },
   { value: 'token', label: '令牌' },
   { value: 'user', label: '用户' },
-  { value: 'ip', label: 'IP' },
   { value: 'group', label: '分组' },
 ] as const;
 
@@ -32,6 +31,9 @@ const SORTS = [
   { value: 'errors', label: '错误数' },
   { value: 'frt', label: '平均 FRT' },
 ] as const;
+
+/** 当前时间范围标题（自然日） */
+const rangeLabel = computed(() => (app.rangeDays === 1 ? '今天' : `近 ${app.rangeDays} 天`));
 
 const totalPages = computed(() => Math.max(1, Math.ceil((store.data?.total ?? 0) / store.limit)));
 const currentPage = computed(() => Math.floor(store.offset / store.limit) + 1);
@@ -88,7 +90,9 @@ const barChart = computed<EChartsCoreOption>(() => ({
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-sm font-semibold">Top 10 分布</h2>
-          <p class="text-[11px] text-muted-foreground">按 {{ SORTS.find((s) => s.value === store.sort)?.label ?? '请求数' }} 排序</p>
+          <p class="text-[11px] text-muted-foreground">
+            {{ rangeLabel }} · 按 {{ SORTS.find((s) => s.value === store.sort)?.label ?? '请求数' }} 排序
+          </p>
         </div>
         <Select :model-value="store.sort" @update:model-value="(v: unknown) => store.setSort((v as DimensionSort) ?? 'requests')">
           <SelectTrigger class="h-8 w-28 text-xs">
@@ -118,12 +122,9 @@ const barChart = computed<EChartsCoreOption>(() => ({
           </TableHeader>
           <TableBody>
             <TableRow v-for="d in store.data?.data ?? []" :key="d.key">
-              <TableCell class="max-w-48 truncate text-xs font-medium">
-                <span class="flex flex-col">
+                <TableCell class="max-w-48 truncate text-xs font-medium">
                   {{ d.key }}
-                  <span v-if="d.location" class="text-[10px] font-normal text-muted-foreground">{{ d.location }}</span>
-                </span>
-              </TableCell>
+                </TableCell>
               <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.requests) }}</TableCell>
               <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.totalTokens) }}</TableCell>
               <TableCell class="text-right text-xs tabular-nums">{{ formatCost(d.cost) }}</TableCell>
@@ -137,16 +138,46 @@ const barChart = computed<EChartsCoreOption>(() => ({
         </Table>
       </div>
 
-      <div class="flex items-center justify-between border-t border-border px-4 py-3">
-        <p class="text-[11px] text-muted-foreground tabular-nums">
-          共 {{ formatNumber(store.data?.total) }} 项 · {{ currentPage }}/{{ totalPages }} 页
-        </p>
-        <div class="flex items-center gap-1">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-t border-border px-4 py-3">
+        <div class="flex items-center gap-2 text-[11px] text-muted-foreground">
+          <span>每页</span>
+          <Select
+            :model-value="String(store.limit)"
+            @update:model-value="(v: unknown) => store.setPageSize(Number(v))"
+          >
+            <SelectTrigger class="h-7 w-16 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem v-for="n in [20, 50, 100, 200]" :key="n" :value="String(n)">{{ n }}</SelectItem>
+            </SelectContent>
+          </Select>
+          <span class="tabular-nums">共 {{ formatNumber(store.data?.total) }} 项 · {{ totalPages }} 页</span>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <Button variant="outline" size="icon-xs" :disabled="currentPage <= 1" @click="store.goTo(1)">
+            <ChevronsLeft class="size-3.5" />
+          </Button>
           <Button variant="outline" size="icon-xs" :disabled="currentPage <= 1" @click="store.goTo(currentPage - 1)">
             <ChevronLeft class="size-3.5" />
           </Button>
+          <span class="flex items-center gap-1 px-1 text-[11px] tabular-nums">
+            <Input
+              :model-value="String(currentPage)"
+              type="number"
+              min="1"
+              :max="totalPages"
+              class="h-7 w-14 text-center text-xs"
+              @update:model-value="(v: unknown) => { const p = Math.min(Math.max(1, Number(v) || 1), totalPages); if (p !== currentPage) store.goTo(p); }"
+            />
+            / {{ totalPages }}
+          </span>
           <Button variant="outline" size="icon-xs" :disabled="currentPage >= totalPages" @click="store.goTo(currentPage + 1)">
             <ChevronRight class="size-3.5" />
+          </Button>
+          <Button variant="outline" size="icon-xs" :disabled="currentPage >= totalPages" @click="store.goTo(totalPages)">
+            <ChevronsRight class="size-3.5" />
           </Button>
         </div>
       </div>

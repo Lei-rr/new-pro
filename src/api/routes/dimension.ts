@@ -1,42 +1,38 @@
 import { z } from 'zod';
 import type { ApiApp } from '../app-type.js';
-import type { IStore } from '../../store/interface.js';
-import type { DimensionQuery } from '../../types/stats.js';
+import type { ApiDeps } from '../deps.js';
 
-const epochMs = z.string().regex(/^\d+$/).transform(Number);
 const num = z.string().regex(/^\d+$/).transform(Number);
 
-const VALID_DIMENSIONS = ['channel', 'model', 'token', 'user', 'ip', 'group'] as const;
+const DIMENSIONS = ['model', 'channel', 'token', 'user', 'group'] as const;
 
-const dimensionParams = z.object({ type: z.enum(VALID_DIMENSIONS) });
+const dimensionParams = z.object({ type: z.enum(DIMENSIONS) });
 
 const dimensionQuery = z.object({
-  start: epochMs.optional(),
-  end: epochMs.optional(),
-  sort: z.enum(['requests', 'tokens', 'quota', 'errors', 'cost', 'frt']).optional(),
+  days: num.optional(),
+  sort: z.enum(['requests', 'tokens', 'quota', 'cost', 'errors', 'frt']).optional(),
   limit: num.optional(),
   offset: num.optional(),
 });
 
-export function registerDimensionRoutes(app: ApiApp, store: IStore): void {
+/** 维度分析：SQL group-by（自然日窗口） */
+export function registerDimensionRoutes(app: ApiApp, deps: ApiDeps): void {
   app.get(
     '/dimension/:type',
     { schema: { params: dimensionParams, querystring: dimensionQuery } },
     async (request) => {
       const { type } = request.params;
-
-      const limit = Math.min(Math.max(1, request.query.limit ?? 100), 1000);
+      const days = Math.min(Math.max(1, request.query.days ?? 7), 90);
+      const limit = Math.min(Math.max(1, request.query.limit ?? 20), 200);
       const offset = Math.max(0, request.query.offset ?? 0);
 
-      const query: DimensionQuery = {
-        start: request.query.start,
-        end: request.query.end,
-        sort: request.query.sort ?? 'requests',
+      const res = await deps.analytics.getDimension(
+        type,
+        days,
+        request.query.sort ?? 'requests',
         limit,
         offset,
-      };
-
-      const res = store.getDimensionStats(type, query);
+      );
       return {
         dimension: type,
         total: res.total,

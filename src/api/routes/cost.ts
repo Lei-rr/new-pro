@@ -1,37 +1,42 @@
 import { z } from 'zod';
 import type { ApiApp } from '../app-type.js';
-import type { IStore } from '../../store/interface.js';
-import type { AnalysisEngine } from '../../engine/registry.js';
+import type { ApiDeps } from '../deps.js';
+import { QUOTA_PER_COST_UNIT } from '../../constants.js';
 
 const num = z.string().regex(/^\d+$/).transform(Number);
 
-const trendQuery = z.object({
-  days: num.optional(),
-});
+const daysQuery = z.object({ days: num.optional() });
 
-export function registerCostRoutes(
-  app: ApiApp,
-  store: IStore,
-  engine: AnalysisEngine,
-): void {
-  app.get('/cost/summary', async () => {
-    const summary = store.getSummary();
-    const costPlugin = engine.getPlugin('cost');
+/** 成本分析聚合：KPI + 趋势 + Token/模型消耗榜 */
+export function registerCostRoutes(app: ApiApp, deps: ApiDeps): void {
+  app.get('/cost/analytics', { schema: { querystring: daysQuery } }, async (request) => {
+    const days = Math.min(Math.max(1, request.query.days ?? 7), 90);
+    const { analytics } = deps;
+
+    const [summary, timeline, tokenTop, modelTop] = await Promise.all([
+      analytics.getSummary(),
+      analytics.getTimeline(days),
+      analytics.getDimension('token', days, 'quota', 10, 0),
+      analytics.getDimension('model', days, 'quota', 8, 0),
+    ]);
+
     return {
       totalQuota: summary.totalQuota,
       totalCost: summary.totalCost,
-      totalRequests: summary.totalRequests,
       billingRequests: summary.billingRequests,
       avgCostPerRequest: summary.billingRequests > 0
         ? summary.totalCost / summary.billingRequests
         : 0,
-      pluginDetails: costPlugin?.getSummary() ?? {},
+      todayCost: summary.totalCost,
+      todayRequests: summary.billingRequests,
+      trend: timeline.map((t: { time: string; quota: number; requests: number }) => ({
+        date: t.time.slice(0, 10),
+        quota: t.quota,
+        cost: t.quota / QUOTA_PER_COST_UNIT,
+        requests: t.requests,
+      })),
+      tokenTop: tokenTop.data,
+      modelTop: modelTop.data,
     };
-  });
-
-  app.get('/cost/trend', { schema: { querystring: trendQuery } }, async (request) => {
-    const raw = request.query.days ?? 7;
-    const days = Math.min(raw > 0 ? raw : 7, 90);
-    return store.getCostTrend(days);
   });
 }

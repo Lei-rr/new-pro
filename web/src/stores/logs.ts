@@ -5,7 +5,7 @@ import type { RawLogEntry, RawLogKind } from '@/api/types';
 import { PAGE_SIZE } from '@/lib/constants';
 import { useAppStore } from './app';
 
-/** 原始日志流：全量展示、按状态筛选、分页 */
+/** 原始日志流：PG 查询、按类型筛选、分页 */
 export const useLogsStore = defineStore('logs', () => {
   const entries = ref<RawLogEntry[]>([]);
   const total = ref(0);
@@ -16,20 +16,18 @@ export const useLogsStore = defineStore('logs', () => {
   const selected = ref<RawLogEntry | null>(null);
   const liveEntries = ref<RawLogEntry[]>([]);
 
-  const limit = PAGE_SIZE;
+  const limit = ref(PAGE_SIZE);
 
   async function search(reset = true): Promise<void> {
     loading.value = true;
     try {
       if (reset) offset.value = 0;
       const app = useAppStore();
-      const now = Date.now();
       const res = await api.logs.stream({
         kind: kind.value,
         q: q.value || undefined,
-        start: now - app.rangeHours * 3_600_000,
-        end: now,
-        limit,
+        days: app.rangeDays,
+        limit: limit.value,
         offset: offset.value,
       });
       entries.value = res.data;
@@ -50,8 +48,14 @@ export const useLogsStore = defineStore('logs', () => {
   }
 
   async function goTo(page: number): Promise<void> {
-    offset.value = (page - 1) * limit;
+    offset.value = (page - 1) * limit.value;
     await search(false);
+  }
+
+  async function setPageSize(size: number): Promise<void> {
+    limit.value = size;
+    offset.value = 0;
+    await search(true);
   }
 
   function select(entry: RawLogEntry | null): void {
@@ -77,6 +81,7 @@ export const useLogsStore = defineStore('logs', () => {
     setKind,
     setQuery,
     goTo,
+    setPageSize,
     select,
     appendLive,
   };

@@ -7,22 +7,25 @@ const store = useLogsStore();
 const details = () => {
   const e = store.selected;
   if (!e) return [];
-  const d = e.detail as Record<string, unknown> | null;
-  if (!d) {
-    return [
-      { label: '时间', value: formatDateTime(e.timestamp) },
-      { label: '请求 ID', value: e.requestId ?? '—' },
-      { label: '来源文件', value: e.sourceFile },
-    ];
-  }
   const items: Array<{ label: string; value: string }> = [
     { label: '时间', value: formatDateTime(e.timestamp) },
-    { label: '请求 ID', value: e.requestId ?? '—' },
+    { label: '请求 ID', value: e.requestId || '—' },
+    { label: '模型', value: e.model ?? '—' },
+    { label: '渠道', value: e.channelId != null ? `#${e.channelId}` : '—' },
+    { label: '渠道名', value: e.channelName ?? '—' },
+    { label: '用户', value: e.username ?? '—' },
+    { label: '令牌', value: e.tokenName ?? '—' },
+    { label: '分组', value: e.group ?? '—' },
+    { label: '流式', value: e.isStream ? '是' : '否' },
+    { label: 'IP', value: e.ip ?? '—' },
   ];
-  for (const [k, v] of Object.entries(d)) {
-    if (v === null || v === undefined) continue;
-    if (k === 'ipLocation') continue;
-    items.push({ label: k, value: typeof v === 'object' ? JSON.stringify(v) : String(v) });
+  if (e.kind === 'consume') {
+    items.push(
+      { label: '提示Tokens', value: formatNumber(e.promptTokens) },
+      { label: '补全Tokens', value: formatNumber(e.completionTokens) },
+      { label: 'Quota', value: formatNumber(e.quota) },
+      { label: '成本', value: formatCost(e.quota / 500000) },
+    );
   }
   return items;
 };
@@ -35,9 +38,7 @@ const details = () => {
         <DrawerTitle class="text-sm font-semibold">
           {{ store.selected?.kind === 'consume' ? '计费记录详情' : '日志详情' }}
         </DrawerTitle>
-        <DrawerDescription class="text-xs font-mono">
-          {{ store.selected?.requestId ?? store.selected?.sourceFile }}
-        </DrawerDescription>
+        <DrawerDescription class="text-xs font-mono">{{ store.selected?.requestId }}</DrawerDescription>
       </DrawerHeader>
 
       <div v-if="store.selected" class="flex flex-col gap-4 px-4 pb-6">
@@ -45,21 +46,6 @@ const details = () => {
           <p class="break-all font-mono text-xs leading-relaxed">{{ store.selected.message }}</p>
         </div>
 
-        <!-- consume 核心指标 -->
-        <div v-if="store.selected.kind === 'consume' && store.selected.detail" class="grid grid-cols-2 gap-2">
-          <div class="rounded-lg border p-3">
-            <p class="text-[11px] text-muted-foreground">成本</p>
-            <p class="mt-0.5 text-sm font-semibold tabular-nums">{{ formatCost(store.selected.detail.cost as number) }}</p>
-          </div>
-          <div class="rounded-lg border p-3">
-            <p class="text-[11px] text-muted-foreground">Tokens</p>
-            <p class="mt-0.5 text-sm font-semibold tabular-nums">
-              {{ formatNumber((store.selected.detail.promptTokens as number) + (store.selected.detail.completionTokens as number)) }}
-            </p>
-          </div>
-        </div>
-
-        <!-- 全字段明细 -->
         <div class="rounded-lg border">
           <div
             v-for="(d, i) in details()"

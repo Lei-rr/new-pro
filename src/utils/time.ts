@@ -142,6 +142,38 @@ export function toMinuteKey(d: Date, tz = 'local'): string {
 }
 
 /**
+ * Epoch (ms) of the start of today (00:00:00) in the given timezone,
+ * optionally shifted back by `daysBack` whole days.
+ * `tz === 'local'` uses the server's local timezone.
+ */
+export function startOfDayMs(now: number, tz: string, daysBack = 0): number {
+  const d = new Date(now);
+  let y: number;
+  let mo: number;
+  let day: number;
+  if (tz === 'local') {
+    y = d.getFullYear();
+    mo = d.getMonth();
+    day = d.getDate();
+  } else {
+    const parts: Record<string, string> = {};
+    for (const p of getFormatter(tz).formatToParts(d)) {
+      parts[p.type] = p.value;
+    }
+    y = Number(parts.year);
+    mo = Number(parts.month) - 1;
+    day = Number(parts.day);
+  }
+  const start = wallClockToEpochMs(y, mo, day, 0, 0, 0, tz === 'local' ? localTzName() : tz);
+  return start - daysBack * 86_400_000;
+}
+
+/** Server-local IANA timezone name (fallback for wallClockToEpochMs). */
+function localTzName(): string {
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+}
+
+/**
  * Convert an hour bucket key back to the epoch (ms) of its start,
  * interpreted in the same timezone used to produce the key.
  */

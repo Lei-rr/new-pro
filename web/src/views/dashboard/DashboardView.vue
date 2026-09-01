@@ -22,13 +22,13 @@ onMounted(() => {
   realtime.onSummary((s) => {
     if (overview.summary) overview.summary = s;
   });
-  // 告知后端窗口范围
-  realtime.sendRange(app.rangeHours);
+  // 告知后端窗口范围（自然日）
+  realtime.sendRange(app.rangeDays);
 });
 
-watch(() => app.rangeHours, () => {
+watch(() => app.rangeDays, () => {
   overview.load();
-  realtime.sendRange(app.rangeHours);
+  realtime.sendRange(app.rangeDays);
 });
 
 const s = computed(() => overview.summary);
@@ -58,7 +58,7 @@ const channelHealth = computed(() => overview.channelHealth.slice(0, 5));
     <!-- KPI 第一行 -->
     <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
       <StatCard
-        title="请求总数"
+        title="计费请求"
         :value="formatNumber(s?.totalRequests)"
         icon="activity"
         :delta="overview.delta('totalRequests')"
@@ -131,7 +131,7 @@ const channelHealth = computed(() => overview.channelHealth.slice(0, 5));
       <div class="flex items-center justify-between">
         <div>
           <h2 class="text-sm font-semibold">请求趋势</h2>
-          <p class="text-[11px] text-muted-foreground">近 {{ app.rangeHours }} 小时 · 每格 1 小时</p>
+          <p class="text-[11px] text-muted-foreground">{{ app.rangeDays === 1 ? '今天' : `近 ${app.rangeDays} 天` }} · 每格 1 小时</p>
         </div>
         <div class="flex items-center gap-3 text-[11px] text-muted-foreground">
           <span class="flex items-center gap-1.5"><span class="size-2 rounded-full bg-foreground" /> 请求</span>
@@ -202,7 +202,7 @@ const channelHealth = computed(() => overview.channelHealth.slice(0, 5));
           <div v-for="(l, i) in logs.liveEntries.slice(0, 30)" :key="i" class="flex items-center gap-2 truncate rounded-md px-2 py-1 odd:bg-muted/40">
             <span class="w-14 shrink-0 text-muted-foreground">{{ formatTime(l.timestamp) }}</span>
             <span class="w-9 shrink-0 font-semibold" :class="l.success ? 'text-emerald-500' : 'text-red-500'">
-              {{ l.kind === 'gin' ? (l.success ? 'OK' : 'HTTP') : l.kind === 'error' ? 'ERR' : l.level }}
+              {{ l.kind === 'error' ? 'ERR' : l.typeLabel }}
             </span>
             <span class="truncate">{{ l.message }}</span>
           </div>

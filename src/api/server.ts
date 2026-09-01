@@ -15,40 +15,30 @@ import * as path from 'node:path';
 import { buildLoggerOptions, createLogger } from '../core/logger.js';
 import { getEnv } from '../env.js';
 import { registerAuth } from './auth.js';
-import type { IStore } from '../store/interface.js';
-import type { AnalysisEngine } from '../engine/registry.js';
-import { registerOverviewRoutes } from './routes/overview.js';
+import type { ApiDeps } from './deps.js';
+import { registerHealthRoutes } from './routes/health.js';
 import { registerDimensionRoutes } from './routes/dimension.js';
 import { registerCostRoutes } from './routes/cost.js';
 import { registerLogRoutes } from './routes/logs.js';
-import { registerHealthRoutes, type HealthDeps } from './routes/health.js';
 import { registerAlertRoutes } from './routes/alerts.js';
 import { registerDashboardRoutes } from './routes/dashboard.js';
-import { registerCostAnalyticsRoutes } from './routes/cost-analytics.js';
 import { registerMetricsRoutes, trackHttpRequest } from './metrics.js';
 
 const log = createLogger('api');
 
 /**
- * Route module registry: add new API domains here.
- * Route paths are version-relative (no /api prefix); modules are mounted
- * under both /api/v1 (canonical) and /api (backward compatibility).
+ * 路由模块注册表：只依赖 ApiDeps（analytics/alerts/isReady）。
+ * 挂载在 /api/v1（标准）与 /api（兼容）。
  */
-function buildRouteRegistrars(
-  store: IStore,
-  engine: AnalysisEngine,
-  deps: HealthDeps,
-): Array<(app: FastifyInstance) => void> {
+function buildRouteRegistrars(deps: ApiDeps): Array<(app: FastifyInstance) => void> {
   return [
-    (app) => registerHealthRoutes(app, store, deps),
-    (app) => registerOverviewRoutes(app, store),
-    (app) => registerDimensionRoutes(app, store),
-    (app) => registerCostRoutes(app, store, engine),
-    (app) => registerLogRoutes(app, store),
-    (app) => registerAlertRoutes(app, engine),
-    (app) => registerDashboardRoutes(app, store, engine),
-    (app) => registerCostAnalyticsRoutes(app, store),
-    (app) => registerMetricsRoutes(app, store),
+    (app) => registerHealthRoutes(app, deps),
+    (app) => registerDimensionRoutes(app, deps),
+    (app) => registerCostRoutes(app, deps),
+    (app) => registerLogRoutes(app, deps),
+    (app) => registerAlertRoutes(app, deps),
+    (app) => registerDashboardRoutes(app, deps),
+    (app) => registerMetricsRoutes(app),
   ];
 }
 
@@ -56,11 +46,7 @@ function buildRouteRegistrars(
  * Create and configure the Fastify application.
  * Separated from startup for testability.
  */
-export async function createApp(
-  store: IStore,
-  engine: AnalysisEngine,
-  deps: HealthDeps = { isReady: () => true },
-): Promise<FastifyInstance> {
+export async function createApp(deps: ApiDeps): Promise<FastifyInstance> {
   const env = getEnv();
 
   const app = Fastify({
@@ -73,18 +59,14 @@ export async function createApp(
 
   // ─── Global plugins ───
   await app.register(sensible);
-  // Dashboard is served over plain HTTP (possibly behind an injecting proxy):
-  // the default CSP's `upgrade-insecure-requests` would break asset loading
-  // (https upgrade on an http origin) and `script-src 'self'` would block
-  // proxied inline scripts. Keep the other security headers.
+  // 面板经 HTTP 提供（可能有注入代理）：默认 CSP 会破坏资源加载
   await app.register(helmet, {
     contentSecurityPolicy: false,
     crossOriginOpenerPolicy: false,
   });
   await app.register(websocket, {
     options: {
-      // Accept the 'api_key.<token>' subprotocol so the key is not exposed
-      // in the URL query string (which can leak into proxy/access logs).
+      // 子协议携带 api_key，避免 URL 泄漏密钥
       handleProtocols: (protocols: Set<string>) => {
         for (const p of protocols) {
           if (p.startsWith('api_key.')) return p;
@@ -94,7 +76,7 @@ export async function createApp(
     },
   });
 
-  // CORS: explicit allowlist from env. Empty = same-origin only.
+  // CORS 白名单
   const origins = env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
   if (origins.length > 0) {
     await app.register(cors, origins.includes('*')
@@ -102,7 +84,7 @@ export async function createApp(
       : { origin: origins, credentials: true });
   }
 
-  // Per-IP rate limiting (brute-force protection); RATE_LIMIT_MAX=0 disables.
+  // 每 IP 限流
   if (env.RATE_LIMIT_MAX > 0) {
     await app.register(rateLimit, {
       global: true,
@@ -111,10 +93,10 @@ export async function createApp(
     });
   }
 
-  // ─── API key auth (HTTP) ───
+  // ─── API key auth ───
   registerAuth(app);
 
-  // ─── Static frontend files (when built) ───
+  // ─── 静态前端 ───
   const webRoot = path.resolve(process.cwd(), 'web/dist');
   let webEnabled = false;
   if (fs.existsSync(webRoot)) {
@@ -129,7 +111,7 @@ export async function createApp(
     log.warn({ webRoot }, 'web/dist not found, static serving disabled');
   }
 
-  // SPA fallback：前端 history 路由（如 /overview）返回 index.html
+  // SPA fallback
   if (webEnabled) {
     app.setNotFoundHandler((request, reply) => {
       if (request.method === 'GET' && !request.url.startsWith('/api/')) {
@@ -139,7 +121,7 @@ export async function createApp(
     });
   }
 
-  // ─── Global error handler (masks internal details on 5xx) ───
+  // ─── 全局错误处理（5xx 掩码） ───
   app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
     const statusCode = error.statusCode && error.statusCode >= 400 && error.statusCode < 600
       ? error.statusCode
@@ -153,18 +135,17 @@ export async function createApp(
     });
   });
 
-  // ─── HTTP metrics counter ───
+  // ─── HTTP metrics ───
   app.addHook('onResponse', (request, reply, done) => {
     trackHttpRequest(request.method, reply.statusCode);
     done();
   });
 
-  // ─── Register route modules (versioned) ───
-  for (const register of buildRouteRegistrars(store, engine, deps)) {
+  // ─── 路由挂载（版本化） ───
+  for (const register of buildRouteRegistrars(deps)) {
     await app.register(async (scoped) => {
       register(scoped);
     }, { prefix: '/api/v1' });
-    // Backward-compatible mount; remove once all clients use /api/v1.
     await app.register(async (scoped) => {
       register(scoped);
     }, { prefix: '/api' });

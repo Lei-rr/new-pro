@@ -7,13 +7,10 @@ services:
     ports:
       - "${PORT:-3600}:3600"
     environment:
+      - SQL_DSN=${SQL_DSN:?SQL_DSN is required (NewAPI PostgreSQL)}
+      - LOG_TZ=${LOG_TZ:-Asia/Shanghai}
       - API_KEYS=${API_KEYS:-}
-      - LOG_TZ=${LOG_TZ:-local}
       - CORS_ORIGINS=${CORS_ORIGINS:-}
-    volumes:
-      # 直接将宿主机 NewAPI 日志目录挂载至容器 /logs（只读安全挂载）
-      - "${LOG_PATH:-/guolei/new-api/logs}:/logs:ro"
-      - newpro-data:/app/data
     read_only: true
     tmpfs:
       - /tmp
@@ -21,6 +18,9 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    networks:
+      - new-api-network
 
-volumes:
-  newpro-data:
+networks:
+  new-api-network:
+    external: true

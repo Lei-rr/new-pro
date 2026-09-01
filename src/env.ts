@@ -7,12 +7,9 @@ const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
 
-  LOG_DIR: z.string().default('/logs'),
-  LOG_PATTERN: z.string().default('*.log'),
-
-  // Timezone of the log source server (NewAPI writes naive wall-clock
-  // timestamps). 'local' = same timezone as this process; otherwise an
-  // IANA name (e.g. 'Asia/Shanghai', 'UTC').
+  // PostgreSQL: NewAPI 数据库（唯一数据源）
+  SQL_DSN: z.string().default(''),
+  // 业务时区（自然日窗口对齐用，默认容器本地时区）
   LOG_TZ: z
     .string()
     .default('local')
@@ -24,7 +21,13 @@ const envSchema = z.object({
       } catch {
         return false;
       }
-    }, 'LOG_TZ must be "local" or a valid IANA timezone (e.g. "Asia/Shanghai", "UTC")'),
+    }, 'LOG_TZ must be "local" or a valid IANA timezone'),
+  // 实时增量轮询间隔（ms）
+  POLL_INTERVAL_MS: z.coerce.number().int().min(500).default(1000),
+  // 统计广播间隔（ms）
+  WS_STATS_INTERVAL_MS: z.coerce.number().int().min(1000).default(3000),
+  // 维度/日志查询的默认时间窗口（自然日）
+  DEFAULT_RANGE_DAYS: z.coerce.number().int().min(1).max(90).default(7),
 
   // Auth: comma-separated API keys. Empty = auth disabled.
   API_KEYS: z.string().default(''),
@@ -36,14 +39,7 @@ const envSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(0).default(600),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1000).default(60_000),
 
-  MAX_ENTRIES: z.coerce.number().default(500_000),
-  RETENTION_HOURS: z.coerce.number().default(72),
-
-  WS_STATS_INTERVAL_MS: z.coerce.number().default(3000),
-  WS_LOGS_BATCH_MS: z.coerce.number().default(200),
-  WS_LOGS_BATCH_SIZE: z.coerce.number().default(20),
-
-  ALERT_IP_RATE_PER_MIN: z.coerce.number().default(100),
+  // 告警阈值
   ALERT_ERROR_RATE: z.coerce.number().default(0.1),
   ALERT_QUOTA_THRESHOLD: z.coerce.number().default(50_000_000),
 });

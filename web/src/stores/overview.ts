@@ -4,7 +4,7 @@ import { api } from '@/api';
 import type { Alert, DimensionStats, OverviewSummary, TimelineBucket } from '@/api/types';
 import { useAppStore } from './app';
 
-/** 总览数据：单次聚合请求（/dashboard） + WS 实时刷新 */
+/** 总览数据：单次聚合请求（/dashboard，自然日窗口） + WS 实时刷新 */
 export const useOverviewStore = defineStore('overview', () => {
   const summary = ref<OverviewSummary | null>(null);
   const prevSummary = ref<OverviewSummary | null>(null);
@@ -15,14 +15,13 @@ export const useOverviewStore = defineStore('overview', () => {
   const channelHealth = ref<Array<{ key: string; requests: number; errors: number; errorRate: number }>>([]);
   const alerts = ref<Alert[]>([]);
   const loading = ref(false);
-  const windowMs = ref(24 * 3_600_000);
 
   async function load(): Promise<void> {
     const app = useAppStore();
-    const hours = app.rangeHours;
+    const days = app.rangeDays;
     loading.value = true;
     try {
-      const res = await api.overview.dashboard(hours);
+      const res = await api.overview.dashboard(days);
       summary.value = res.summary;
       prevSummary.value = res.prevSummary;
       timeline.value = res.timeline;
@@ -31,7 +30,6 @@ export const useOverviewStore = defineStore('overview', () => {
       topUsers.value = res.topUsers;
       channelHealth.value = res.channelHealth;
       alerts.value = res.alerts;
-      windowMs.value = hours * 3_600_000;
     } finally {
       loading.value = false;
     }
@@ -47,6 +45,6 @@ export const useOverviewStore = defineStore('overview', () => {
 
   return {
     summary, prevSummary, timeline, topModels, topChannels, topUsers,
-    channelHealth, alerts, loading, windowMs, load, delta,
+    channelHealth, alerts, loading, load, delta,
   };
 });

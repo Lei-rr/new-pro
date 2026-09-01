@@ -38,7 +38,7 @@ export interface TimelineBucket {
   users: number;
 }
 
-export type DimensionType = 'channel' | 'model' | 'token' | 'user' | 'ip' | 'group';
+export type DimensionType = 'channel' | 'model' | 'token' | 'user' | 'group';
 export type DimensionSort = 'requests' | 'tokens' | 'quota' | 'errors' | 'cost' | 'frt';
 
 export interface DimensionStats {
@@ -53,7 +53,6 @@ export interface DimensionStats {
   avgResponseTime: number;
   avgFrt: number;
   cacheTokens: number;
-  location?: string;
   firstSeen: number;
   lastSeen: number;
 }
@@ -100,59 +99,6 @@ export interface AlertsResponse {
   summaries: Record<string, Record<string, unknown>>;
 }
 
-export interface LogEntry {
-  timestamp: number;
-  requestId: string;
-  userId: number;
-  ip: string | null;
-  ipLocation: string | null;
-  channelId: number;
-  model: string;
-  tokenName: string;
-  tokenId: number;
-  promptTokens: number;
-  completionTokens: number;
-  cacheTokens: number;
-  quota: number;
-  cost: number;
-  useTime: number;
-  frt: number | null;
-  isStream: boolean;
-  group: string;
-  requestPath: string | null;
-  billingSource: string | null;
-  billingMode: string | null;
-  streamStatus: string | null;
-  modelRatio: number | null;
-  modelPrice: number | null;
-  completionRatio: number | null;
-  groupRatio: number | null;
-  userGroupRatio: number | null;
-  cacheRatio: number | null;
-  matchedTier: string | null;
-  adminUseChannel: string[] | null;
-}
-
-export interface LogListResponse {
-  total: number;
-  count: number;
-  offset: number;
-  limit: number;
-  data: LogEntry[];
-}
-
-export interface LogSearchFilter {
-  q?: string;
-  model?: string;
-  user?: string;
-  channel?: string;
-  ip?: string;
-  start?: number;
-  end?: number;
-  limit?: number;
-  offset?: number;
-}
-
 export interface HealthInfo {
   status: string;
   uptime: number;
@@ -190,31 +136,30 @@ export interface CostAnalyticsResponse {
   modelTop: DimensionStats[];
 }
 
-export interface LogFacet {
-  key: string;
-  requests: number;
-}
-
-export interface LogFacetsResponse {
-  models: LogFacet[];
-  channels: LogFacet[];
-  users: LogFacet[];
-}
-
 // ─── 原始日志流 ───
 
-export type RawLogKind = 'all' | 'consume' | 'gin' | 'error' | 'sys' | 'success' | 'failure';
+export type RawLogKind = 'all' | 'consume' | 'error' | 'sys' | 'success' | 'failure';
 
 export interface RawLogEntry {
+  id: string;
   timestamp: number;
-  requestId: string | null;
-  sourceFile: string;
-  level: 'SYS' | 'GIN' | 'INFO' | 'ERR';
-  kind: 'consume' | 'gin' | 'error' | 'sys' | 'info';
+  type: number;
+  typeLabel: string;
+  kind: 'consume' | 'error' | 'sys' | 'info';
   success: boolean;
-  statusCode?: number;
+  model: string | null;
+  channelId: number | null;
+  channelName: string | null;
+  quota: number;
+  promptTokens: number;
+  completionTokens: number;
+  isStream: boolean;
+  ip: string | null;
+  requestId: string;
+  username: string | null;
+  tokenName: string | null;
+  group: string | null;
   message: string;
-  detail: Record<string, unknown> | null;
 }
 
 export interface RawLogResponse {

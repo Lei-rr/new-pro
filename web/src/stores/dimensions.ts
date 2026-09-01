@@ -4,7 +4,7 @@ import { api } from '@/api';
 import type { DimensionResponse, DimensionSort, DimensionType } from '@/api/types';
 import { useAppStore } from './app';
 
-/** 维度分析：类型切换、排序、分页（时间范围随全局） */
+/** 维度分析：类型切换、排序、分页（时间范围按自然日随全局） */
 export const useDimensionsStore = defineStore('dimensions', () => {
   const type = ref<DimensionType>('model');
   const sort = ref<DimensionSort>('requests');
@@ -18,7 +18,10 @@ export const useDimensionsStore = defineStore('dimensions', () => {
     try {
       const app = useAppStore();
       const now = Date.now();
-      const start = now - app.rangeHours * 3_600_000;
+      // 自然日对齐：今天 00:00（本地时区）往前 N-1 天
+      const startOfToday = new Date();
+      startOfToday.setHours(0, 0, 0, 0);
+      const start = startOfToday.getTime() - (app.rangeDays - 1) * 86_400_000;
       data.value = await api.dimension.get(type.value, {
         sort: sort.value,
         limit: limit.value,
@@ -48,5 +51,11 @@ export const useDimensionsStore = defineStore('dimensions', () => {
     await load();
   }
 
-  return { type, sort, data, loading, limit, offset, load, setType, setSort, goTo };
+  async function setPageSize(size: number): Promise<void> {
+    limit.value = size;
+    offset.value = 0;
+    await load();
+  }
+
+  return { type, sort, data, loading, limit, offset, load, setType, setSort, goTo, setPageSize };
 });

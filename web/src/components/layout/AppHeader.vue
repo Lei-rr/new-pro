@@ -34,13 +34,13 @@ function onRangeChange(value: string): void {
       <WifiOff v-else class="size-4" />
     </span>
 
-    <!-- 全局时间范围 -->
-    <Select :model-value="String(app.rangeHours)" @update:model-value="onRangeChange">
+    <!-- 全局时间范围（自然日） -->
+    <Select :model-value="String(app.rangeDays)" @update:model-value="onRangeChange">
       <SelectTrigger class="h-8 w-28 text-xs">
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem v-for="r in TIME_RANGES" :key="r.hours" :value="String(r.hours)">
+        <SelectItem v-for="r in TIME_RANGES" :key="r.days" :value="String(r.days)">
           {{ r.label }}
         </SelectItem>
       </SelectContent>

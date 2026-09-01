@@ -1,18 +1,10 @@
 import { Container } from './core/container.js';
-import { EventBus } from './core/event-bus.js';
 import { logger } from './core/logger.js';
 import { getEnv } from './env.js';
-import { MemoryStore } from './store/memory.js';
-import { LogWatcher } from './ingest/watcher.js';
-import {
-  AnalysisEngine,
-  IpPlugin,
-  CostPlugin,
-  TokenPlugin,
-  ErrorRatePlugin,
-  ChannelHealthPlugin,
-  AbuseDetectionPlugin,
-} from './engine/index.js';
+import { PgStore } from './db/pg-store.js';
+import { PgPolling } from './db/polling.js';
+import { AnalyticsService } from './service/analytics.js';
+import { AlertEngine } from './service/alerts.js';
 import { WsHub } from './ws/hub.js';
 import { createApp } from './api/server.js';
 
@@ -20,61 +12,51 @@ async function bootstrap(): Promise<void> {
   const env = getEnv();
   const log = logger;
 
-  log.info({ env: env.NODE_ENV, port: env.PORT }, 'Starting new-pro');
+  log.info({ env: env.NODE_ENV, port: env.PORT }, 'Starting New-Pro');
 
-  // ─── Core (explicit wiring, no hidden singletons) ───
-  const bus = new EventBus();
-  const container = new Container();
+  if (!env.SQL_DSN) {
+    log.fatal('SQL_DSN is required (NewAPI PostgreSQL). Refusing to start.');
+    process.exit(1);
+  }
+
   let ready = false;
 
-  // ─── Store ───
-  const store = new MemoryStore();
-  container.register('store', store);
+  // ─── 数据层：PG（唯一数据源） ───
+  const pg = new PgStore(env.SQL_DSN);
+  await pg.init();
+  log.info('PostgreSQL connected');
 
-  // ─── Analysis Engine (plugin-based) ───
-  const engine = new AnalysisEngine(bus, store);
-  engine
-    .use(new IpPlugin())
-    .use(new CostPlugin())
-    .use(new TokenPlugin())
-    .use(new ErrorRatePlugin())
-    .use(new ChannelHealthPlugin())
-    .use(new AbuseDetectionPlugin());
-  container.register('engine', engine);
+  // ─── 领域层 ───
+  const analytics = new AnalyticsService(pg);
+  const alerts = new AlertEngine(pg);
 
-  // ─── WebSocket Hub (registered before watcher so realtime listeners are ready) ───
-  const wsHub = new WsHub(store, engine, bus);
-  container.register('wsHub', wsHub);
+  // ─── 实时增量（仅日志流：主键游标，压力≈0） ───
+  const polling = new PgPolling(pg);
 
-  // ─── Ingest (full history replay on startup; store is in-memory) ───
-  const watcher = new LogWatcher(bus);
-  container.register('watcher', watcher);
-
-  // ─── Wire EventBus → Store ───
-  bus.on('log:batch', (entries) => store.appendBatch(entries));
-  bus.on('log:entry', (entry) => store.append(entry));
-
-  // ─── HTTP Server ───
-  const app = await createApp(store, engine, { isReady: () => ready });
+  // ─── 交付层 ───
+  const wsHub = new WsHub(analytics, alerts, polling);
+  const app = await createApp({ analytics, alerts, isReady: () => ready });
   wsHub.registerRoute(app);
 
-  // ─── Listen first so health endpoints respond during history load ───
-  const address = await app.listen({ port: env.PORT, host: env.HOST });
-  log.info({ address }, 'Server listening');
-  log.info(`REST API: http://localhost:${env.PORT}/api/v1/health/live`);
+  await app.listen({ port: env.PORT, host: env.HOST });
+  log.info(`REST API: http://localhost:${env.PORT}/api/v1`);
   log.info(`WebSocket: ws://localhost:${env.PORT}/ws`);
-  log.info(`Metrics:   http://localhost:${env.PORT}/api/v1/metrics`);
 
-  // ─── Start all lifecycle services (watcher loads history in background) ───
+  // ─── 生命周期 ───
+  const container = new Container();
+  container.register('alerts', alerts);
+  container.register('polling', polling);
+  container.register('wsHub', wsHub);
   await container.startAll();
   ready = true;
-  log.info('Ready: ingest pipeline started');
+  log.info('Ready');
 
   // ─── Graceful shutdown ───
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'Shutting down...');
     ready = false;
     await container.stopAll();
+    await pg.close();
     await app.close();
     process.exit(0);
   };

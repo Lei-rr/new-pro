@@ -30,9 +30,7 @@ RUN pnpm install --frozen-lockfile --prod && pnpm store prune
 COPY --from=server-builder /app/dist ./dist/
 COPY --from=web-builder /web/dist ./web/dist/
 
-# Create logs mount point + checkpoint data dir (writable by node user)
-RUN mkdir -p /logs /app/data && chown -R node:node /app /logs
-
+# PG 为唯一数据源，无需挂载目录
 USER node
 
 EXPOSE 3600

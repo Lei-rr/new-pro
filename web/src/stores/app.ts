@@ -3,14 +3,14 @@ import { computed, ref, watch } from 'vue';
 
 export type Theme = 'light' | 'dark';
 
-/** 全局应用状态：主题、侧栏（移动端）、全局时间范围 */
+/** 全局应用状态：主题、侧栏（移动端）、全局时间范围（自然日粒度） */
 export const useAppStore = defineStore('app', () => {
   const theme = ref<Theme>(
     (localStorage.getItem('newpro-theme') as Theme) ??
       (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'),
   );
   const mobileNavOpen = ref(false);
-  const rangeHours = ref(24);
+  const rangeDays = ref(1);
 
   const isDark = computed(() => theme.value === 'dark');
 
@@ -24,11 +24,11 @@ export const useAppStore = defineStore('app', () => {
     applyTheme();
   }
 
-  function setRange(hours: number): void {
-    rangeHours.value = hours;
+  function setRange(days: number): void {
+    rangeDays.value = days;
   }
 
   watch(theme, applyTheme, { immediate: true });
 
-  return { theme, isDark, toggleTheme, mobileNavOpen, rangeHours, setRange };
+  return { theme, isDark, toggleTheme, mobileNavOpen, rangeDays, setRange };
 });

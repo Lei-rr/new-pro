@@ -27,16 +27,15 @@ export const SEVERITY_COLOR: Record<string, string> = {
   info: SEMANTIC.info,
 } as const;
 
-/** 时间范围预设（统一供 Header 与各页面使用） */
+/** 时间范围预设：按自然日（今天/昨天/近N天），统一按日对齐 */
 export const TIME_RANGES = [
-  { label: '近 1 小时', hours: 1 },
-  { label: '近 6 小时', hours: 6 },
-  { label: '近 24 小时', hours: 24 },
-  { label: '近 7 天', hours: 24 * 7 },
-  { label: '近 30 天', hours: 24 * 30 },
+  { label: '今天', days: 1 },
+  { label: '近 3 天', days: 3 },
+  { label: '近 7 天', days: 7 },
+  { label: '近 30 天', days: 30 },
 ] as const;
 
-export type TimeRangeHours = (typeof TIME_RANGES)[number]['hours'];
+export type TimeRangeDays = (typeof TIME_RANGES)[number]['days'];
 
 export interface NavItem {
   title: string;

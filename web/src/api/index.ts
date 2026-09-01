@@ -10,7 +10,6 @@ import type {
   DimensionSort,
   DimensionType,
   HealthInfo,
-  LogFacetsResponse,
   RawLogResponse,
   OverviewSummary,
   TimelineBucket,
@@ -66,27 +65,21 @@ export const api = {
   },
 
   logs: {
-    /** 原始日志流（全量、不去重；kind: all/consume/gin/error/success/failure） */
+    /** 原始日志流（PG logs 表；kind: all/consume/error/sys/success/failure） */
     stream(filter: {
       kind?: string;
       q?: string;
-      start?: number;
-      end?: number;
+      days?: number;
       limit?: number;
       offset?: number;
     } = {}): Promise<RawLogResponse> {
       return request('/api/v1/logs/stream', {
         kind: filter.kind,
         q: filter.q,
-        start: filter.start,
-        end: filter.end,
+        days: filter.days,
         limit: filter.limit,
         offset: filter.offset,
       });
-    },
-    /** 筛选器候选值（模型/渠道/用户去重列表） */
-    facets(): Promise<LogFacetsResponse> {
-      return request('/api/v1/logs/facets');
     },
   },
 

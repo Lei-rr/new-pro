@@ -57,9 +57,9 @@ export const useRealtimeStore = defineStore('realtime', () => {
     client.connect();
   }
 
-  /** 告知后端本客户端的窗口范围，stats 推送按窗口聚合 */
-  function sendRange(hours: number): void {
-    client.send({ type: 'range', data: { rangeHours: hours } });
+  /** 告知后端本客户端的自然日窗口，stats 推送按窗口聚合 */
+  function sendRange(days: number): void {
+    client.send({ type: 'range', data: { rangeDays: days } });
   }
 
   function disconnect(): void {
