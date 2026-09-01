@@ -1,62 +1,64 @@
-import { Container } from './core/container.js';
-import { logger } from './core/logger.js';
-import { getEnv } from './env.js';
-import { PgStore } from './db/pg-store.js';
-import { PgPolling } from './db/polling.js';
-import { AnalyticsService } from './service/analytics.js';
-import { AlertEngine } from './service/alerts.js';
-import { WsHub } from './ws/hub.js';
+import { LifecycleManager } from './core/lifecycle.js';
+import { createLogger, logger } from './core/logger.js';
+import { loadConfig } from './config/env.js';
+import { Database } from './core/db.js';
+import { AnalyticsRepository } from './modules/analytics/analytics.repo.js';
+import { AnalyticsService } from './modules/analytics/analytics.service.js';
+import { LogsRepository } from './modules/logs/logs.repo.js';
+import { LogsService } from './modules/logs/logs.service.js';
+import { AlertsService } from './modules/alerts/alerts.service.js';
+import { LivePoller } from './modules/live/polling.js';
+import { WsHub } from './modules/live/ws.hub.js';
 import { createApp } from './api/server.js';
 
+/**
+ * 组合根：唯一装配点。
+ * 依赖方向：routes → service → repo → core/db，显式构造，无框架。
+ */
 async function bootstrap(): Promise<void> {
-  const env = getEnv();
+  const config = loadConfig();
   const log = logger;
 
-  log.info({ env: env.NODE_ENV, port: env.PORT }, 'Starting New-Pro');
+  log.info({ env: config.NODE_ENV, port: config.PORT }, 'Starting New-Pro');
 
-  if (!env.SQL_DSN) {
-    log.fatal('SQL_DSN is required (NewAPI PostgreSQL). Refusing to start.');
-    process.exit(1);
-  }
-
-  let ready = false;
-
-  // ─── 数据层：PG（唯一数据源） ───
-  const pg = new PgStore(env.SQL_DSN);
-  await pg.init();
+  // ─── core ───
+  const db = Database.fromEnv();
+  await db.connect();
   log.info('PostgreSQL connected');
 
-  // ─── 领域层 ───
-  const analytics = new AnalyticsService(pg);
-  const alerts = new AlertEngine(pg);
+  // ─── 仓库层 ───
+  const analyticsRepo = new AnalyticsRepository(db);
+  const logsRepo = new LogsRepository(db);
 
-  // ─── 实时增量（仅日志流：主键游标，压力≈0） ───
-  const polling = new PgPolling(pg);
+  // ─── 服务层 ───
+  const analytics = new AnalyticsService(analyticsRepo);
+  const logs = new LogsService(logsRepo);
+  const alerts = new AlertsService(db);
 
-  // ─── 交付层 ───
-  const wsHub = new WsHub(analytics, alerts, polling);
-  const app = await createApp({ analytics, alerts, isReady: () => ready });
-  wsHub.registerRoute(app);
+  // ─── 实时层 ───
+  const poller = new LivePoller(logsRepo);
+  const wsHub = new WsHub(logs, poller);
 
-  await app.listen({ port: env.PORT, host: env.HOST });
-  log.info(`REST API: http://localhost:${env.PORT}/api/v1`);
-  log.info(`WebSocket: ws://localhost:${env.PORT}/ws`);
+  let ready = false;
+  const app = await createApp({ analytics, logs, alerts, wsHub, isReady: () => ready });
+
+  await app.listen({ port: config.PORT, host: config.HOST });
+  log.info(`REST API: http://localhost:${config.PORT}/api/v1`);
+  log.info(`WebSocket: ws://localhost:${config.PORT}/ws`);
 
   // ─── 生命周期 ───
-  const container = new Container();
-  container.register('alerts', alerts);
-  container.register('polling', polling);
-  container.register('wsHub', wsHub);
-  await container.startAll();
+  const lifecycle = new LifecycleManager();
+  lifecycle.register('poller', poller);
+  lifecycle.register('wsHub', wsHub);
+  await lifecycle.startAll();
   ready = true;
   log.info('Ready');
 
-  // ─── Graceful shutdown ───
   const shutdown = async (signal: string) => {
     log.info({ signal }, 'Shutting down...');
     ready = false;
-    await container.stopAll();
-    await pg.close();
+    await lifecycle.stopAll();
+    await db.close();
     await app.close();
     process.exit(0);
   };
@@ -66,6 +68,6 @@ async function bootstrap(): Promise<void> {
 }
 
 bootstrap().catch((err) => {
-  logger.fatal({ err }, 'Fatal startup error');
+  createLogger('bootstrap').fatal({ err }, 'Fatal startup error');
   process.exit(1);
 });

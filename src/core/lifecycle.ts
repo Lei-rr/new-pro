@@ -1,39 +1,32 @@
 import { createLogger } from './logger.js';
 
-const log = createLogger('container');
-
 /**
- * Component lifecycle interface.
- * Any service that needs startup/shutdown logic implements this.
+ * 生命周期：启动/停机编排。
+ * 组件显式注册，start 顺序执行，stop 逆序执行（容错）。
  */
 export interface Lifecycle {
-  /** Called during application bootstrap, in dependency order */
   start(): Promise<void>;
-  /** Called during graceful shutdown, in reverse order */
   stop(): Promise<void>;
 }
 
-/**
- * Lightweight service lifecycle manager.
- * Services are registered at bootstrap; started in order, stopped in reverse.
- */
-export class Container {
-  private lifecycles: { name: string; service: Lifecycle }[] = [];
+export class LifecycleManager {
+  private items: Array<{ name: string; service: Lifecycle }> = [];
 
   register(name: string, service: unknown): void {
     if (isLifecycle(service)) {
-      this.lifecycles.push({ name, service });
+      this.items.push({ name, service });
     }
   }
 
   async startAll(): Promise<void> {
-    for (const item of this.lifecycles) {
+    for (const item of this.items) {
       await item.service.start();
     }
   }
 
   async stopAll(): Promise<void> {
-    for (const item of [...this.lifecycles].reverse()) {
+    const log = createLogger('lifecycle');
+    for (const item of [...this.items].reverse()) {
       try {
         await item.service.stop();
       } catch (err) {

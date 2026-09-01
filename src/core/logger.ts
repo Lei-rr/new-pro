@@ -1,13 +1,13 @@
 import pino from 'pino';
 import type { LoggerOptions } from 'pino';
-import { getEnv } from '../env.js';
+import { loadConfig } from '../config/env.js';
 
 /**
  * Shared pino options: JSON structured logs in production/test,
  * pretty-printed in development.
  */
 export function buildLoggerOptions(name?: string): LoggerOptions {
-  const env = getEnv();
+  const env = loadConfig();
   const opts: LoggerOptions = {
     level: env.LOG_LEVEL,
     ...(name && { name }),

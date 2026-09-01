@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { createLogger } from '../core/logger.js';
-import { getEnv } from '../env.js';
+import { loadConfig } from '../config/env.js';
 
 const log = createLogger('auth');
 
@@ -12,7 +12,7 @@ let cachedKeys: string[] | null = null;
 /** Load configured API keys (comma-separated), parsed once at startup. */
 export function loadApiKeys(): string[] {
   if (cachedKeys === null) {
-    cachedKeys = getEnv().API_KEYS.split(',').map((k) => k.trim()).filter(Boolean);
+    cachedKeys = loadConfig().API_KEYS.split(',').map((k) => k.trim()).filter(Boolean);
   }
   return cachedKeys;
 }

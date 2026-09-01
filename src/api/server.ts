@@ -13,41 +13,34 @@ import {
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { buildLoggerOptions, createLogger } from '../core/logger.js';
-import { getEnv } from '../env.js';
+import { loadConfig } from '../config/env.js';
 import { registerAuth } from './auth.js';
-import type { ApiDeps } from './deps.js';
-import { registerHealthRoutes } from './routes/health.js';
-import { registerDimensionRoutes } from './routes/dimension.js';
-import { registerCostRoutes } from './routes/cost.js';
-import { registerLogRoutes } from './routes/logs.js';
-import { registerAlertRoutes } from './routes/alerts.js';
-import { registerDashboardRoutes } from './routes/dashboard.js';
 import { registerMetricsRoutes, trackHttpRequest } from './metrics.js';
+import type { AnalyticsService } from '../modules/analytics/analytics.service.js';
+import type { LogsService } from '../modules/logs/logs.service.js';
+import type { AlertsService } from '../modules/alerts/alerts.service.js';
+import { registerAnalyticsRoutes } from '../modules/analytics/analytics.routes.js';
+import { registerLogsRoutes } from '../modules/logs/logs.routes.js';
+import { registerAlertsRoutes } from '../modules/alerts/alerts.routes.js';
+import { registerHealthRoutes } from './routes/health.js';
+import type { WsHub } from '../modules/live/ws.hub.js';
 
 const log = createLogger('api');
 
-/**
- * 路由模块注册表：只依赖 ApiDeps（analytics/alerts/isReady）。
- * 挂载在 /api/v1（标准）与 /api（兼容）。
- */
-function buildRouteRegistrars(deps: ApiDeps): Array<(app: FastifyInstance) => void> {
-  return [
-    (app) => registerHealthRoutes(app, deps),
-    (app) => registerDimensionRoutes(app, deps),
-    (app) => registerCostRoutes(app, deps),
-    (app) => registerLogRoutes(app, deps),
-    (app) => registerAlertRoutes(app, deps),
-    (app) => registerDashboardRoutes(app, deps),
-    (app) => registerMetricsRoutes(app),
-  ];
+export interface AppDeps {
+  analytics: AnalyticsService;
+  logs: LogsService;
+  alerts: AlertsService;
+  wsHub: WsHub;
+  isReady: () => boolean;
 }
 
 /**
- * Create and configure the Fastify application.
- * Separated from startup for testability.
+ * Fastify 组装：安全插件 + 静态前端 + 模块路由挂载。
+ * 模块路由在 /api/v1（标准）与 /api（兼容）双挂载。
  */
-export async function createApp(deps: ApiDeps): Promise<FastifyInstance> {
-  const env = getEnv();
+export async function createApp(deps: AppDeps): Promise<FastifyInstance> {
+  const config = loadConfig();
 
   const app = Fastify({
     logger: buildLoggerOptions('api'),
@@ -57,16 +50,15 @@ export async function createApp(deps: ApiDeps): Promise<FastifyInstance> {
   app.setValidatorCompiler(validatorCompiler);
   app.setSerializerCompiler(serializerCompiler);
 
-  // ─── Global plugins ───
+  // ─── 安全插件 ───
   await app.register(sensible);
-  // 面板经 HTTP 提供（可能有注入代理）：默认 CSP 会破坏资源加载
+  // 面板走 HTTP（可能有注入代理）：默认 CSP 破坏资源加载，关闭
   await app.register(helmet, {
     contentSecurityPolicy: false,
     crossOriginOpenerPolicy: false,
   });
   await app.register(websocket, {
     options: {
-      // 子协议携带 api_key，避免 URL 泄漏密钥
       handleProtocols: (protocols: Set<string>) => {
         for (const p of protocols) {
           if (p.startsWith('api_key.')) return p;
@@ -76,42 +68,32 @@ export async function createApp(deps: ApiDeps): Promise<FastifyInstance> {
     },
   });
 
-  // CORS 白名单
-  const origins = env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
+  const origins = config.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
   if (origins.length > 0) {
     await app.register(cors, origins.includes('*')
       ? { origin: '*' }
       : { origin: origins, credentials: true });
   }
 
-  // 每 IP 限流
-  if (env.RATE_LIMIT_MAX > 0) {
+  if (config.RATE_LIMIT_MAX > 0) {
     await app.register(rateLimit, {
       global: true,
-      max: env.RATE_LIMIT_MAX,
-      timeWindow: env.RATE_LIMIT_WINDOW_MS,
+      max: config.RATE_LIMIT_MAX,
+      timeWindow: config.RATE_LIMIT_WINDOW_MS,
     });
   }
 
-  // ─── API key auth ───
   registerAuth(app);
 
   // ─── 静态前端 ───
   const webRoot = path.resolve(process.cwd(), 'web/dist');
   let webEnabled = false;
   if (fs.existsSync(webRoot)) {
-    await app.register(fastifyStatic, {
-      root: webRoot,
-      prefix: '/',
-      index: ['index.html'],
-    });
+    await app.register(fastifyStatic, { root: webRoot, prefix: '/', index: ['index.html'] });
     webEnabled = true;
-    log.info({ webRoot }, 'Static frontend serving enabled');
   } else {
     log.warn({ webRoot }, 'web/dist not found, static serving disabled');
   }
-
-  // SPA fallback
   if (webEnabled) {
     app.setNotFoundHandler((request, reply) => {
       if (request.method === 'GET' && !request.url.startsWith('/api/')) {
@@ -121,7 +103,7 @@ export async function createApp(deps: ApiDeps): Promise<FastifyInstance> {
     });
   }
 
-  // ─── 全局错误处理（5xx 掩码） ───
+  // ─── 错误处理（5xx 掩码） ───
   app.setErrorHandler((error: Error & { statusCode?: number }, request, reply) => {
     const statusCode = error.statusCode && error.statusCode >= 400 && error.statusCode < 600
       ? error.statusCode
@@ -141,15 +123,21 @@ export async function createApp(deps: ApiDeps): Promise<FastifyInstance> {
     done();
   });
 
-  // ─── 路由挂载（版本化） ───
-  for (const register of buildRouteRegistrars(deps)) {
-    await app.register(async (scoped) => {
-      register(scoped);
-    }, { prefix: '/api/v1' });
-    await app.register(async (scoped) => {
-      register(scoped);
-    }, { prefix: '/api' });
+  // ─── 模块路由（版本化双挂载） ───
+  const modules: Array<(scoped: FastifyInstance) => void> = [
+    (scoped) => registerHealthRoutes(scoped, deps),
+    (scoped) => registerAnalyticsRoutes(scoped, deps.analytics, () => deps.alerts.check() as Promise<unknown[]>),
+    (scoped) => registerLogsRoutes(scoped, deps.logs),
+    (scoped) => registerAlertsRoutes(scoped, deps.alerts),
+    (scoped) => registerMetricsRoutes(scoped),
+  ];
+
+  for (const register of modules) {
+    await app.register(async (scoped) => register(scoped), { prefix: '/api/v1' });
+    await app.register(async (scoped) => register(scoped), { prefix: '/api' });
   }
+
+  deps.wsHub.registerRoute(app);
 
   return app;
 }

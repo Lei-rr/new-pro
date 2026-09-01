@@ -172,33 +172,3 @@ export function startOfDayMs(now: number, tz: string, daysBack = 0): number {
 function localTzName(): string {
   return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
 }
-
-/**
- * Convert an hour bucket key back to the epoch (ms) of its start,
- * interpreted in the same timezone used to produce the key.
- */
-export function hourKeyToEpochMs(key: string, tz = 'local'): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})$/.exec(key);
-  if (m) {
-    if (tz === 'local') {
-      return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
-    }
-    return wallClockToEpochMs(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], tz);
-  }
-  return new Date(key).getTime();
-}
-
-/**
- * Convert a minute key ("YYYY-MM-DDTHH:mm") back to epoch (ms) in the
- * timezone used to produce the key.
- */
-export function minuteKeyToEpochMs(key: string, tz = 'local'): number {
-  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/.exec(key);
-  if (m) {
-    if (tz === 'local') {
-      return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]).getTime();
-    }
-    return wallClockToEpochMs(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], 0, tz);
-  }
-  return new Date(key).getTime();
-}
