@@ -90,39 +90,45 @@ export class PgStore {
       requests: string; consumes: string; errors: string; error_logs: string;
       prompt: string; completion: string; quota: string; cache: string;
       stream: string; client_gone: string;
-      models: string; channels: string; users: string; tokens: string; groups: string;
       use_time: string; frt_sum: string; frt_count: string;
+    }>(
+      `SELECT
+        (SELECT COUNT(*)::bigint FROM logs WHERE type = 2 AND created_at >= $1 AND created_at < $2) AS consumes,
+        (SELECT COALESCE(SUM(prompt_tokens), 0)::bigint FROM logs WHERE type = 2 AND created_at >= $1 AND created_at < $2) AS prompt,
+        (SELECT COALESCE(SUM(completion_tokens), 0)::bigint FROM logs WHERE type = 2 AND created_at >= $1 AND created_at < $2) AS completion,
+        (SELECT COALESCE(SUM(quota), 0)::bigint FROM logs WHERE type = 2 AND created_at >= $1 AND created_at < $2) AS quota,
+        (SELECT COALESCE(SUM(use_time), 0)::bigint FROM logs WHERE type = 2 AND created_at >= $1 AND created_at < $2) AS use_time,
+        (SELECT COUNT(*)::bigint FROM logs WHERE type = 2 AND is_stream AND created_at >= $1 AND created_at < $2) AS stream,
+        (SELECT COUNT(*)::bigint FROM logs WHERE type = 5 AND created_at >= $1 AND created_at < $2) AS errors,
+        (SELECT COUNT(*)::bigint FROM logs WHERE type = 5 AND created_at >= $1 AND created_at < $2) AS error_logs,
+        0::bigint AS cache,
+        0::bigint AS client_gone,
+        0::bigint AS frt_sum,
+        0::bigint AS frt_count,
+        (SELECT COUNT(*)::bigint FROM logs WHERE type = 2 AND created_at >= $1 AND created_at < $2) AS requests`,
+      [startSec, endSec],
+    );
+    // 维度计数（单独查询，避免重复扫描）
+    const dimRes = await this.query<{
+      models: string; channels: string; users: string; tokens: string; groups: string;
       first_entry: string | null; last_entry: string | null;
     }>(
       `SELECT
-        COUNT(*) FILTER (WHERE type = 2)::bigint AS consumes,
-        SUM(prompt_tokens)::bigint AS prompt,
-        SUM(completion_tokens)::bigint AS completion,
-        SUM(quota)::bigint AS quota,
-        SUM(use_time)::bigint AS use_time,
-        COUNT(*) FILTER (WHERE is_stream)::bigint AS stream,
         COUNT(DISTINCT model_name)::bigint AS models,
         COUNT(DISTINCT channel_id)::bigint AS channels,
         COUNT(DISTINCT user_id)::bigint AS users,
         COUNT(DISTINCT token_name)::bigint AS tokens,
         COUNT(DISTINCT "group")::bigint AS groups,
         MIN(created_at) AS first_entry,
-        MAX(created_at) AS last_entry,
-        0::bigint AS errors,
-        0::bigint AS error_logs,
-        0::bigint AS cache,
-        0::bigint AS client_gone,
-        0::bigint AS frt_sum,
-        0::bigint AS frt_count,
-        0::bigint AS requests
+        MAX(created_at) AS last_entry
       FROM logs
       WHERE type = 2 AND created_at >= $1 AND created_at < $2`,
       [startSec, endSec],
     );
-    const r = res.rows[0];
-    const requests = Number(r.requests ?? 0);
+    const d = dimRes.rows[0];
+    const r = res.rows[0] ?? {};
     return {
-      requests,
+      requests: Number(r.requests ?? 0),
       consumes: Number(r.consumes ?? 0),
       promptTokens: Number(r.prompt ?? 0),
       completionTokens: Number(r.completion ?? 0),
@@ -132,16 +138,16 @@ export class PgStore {
       cacheTokens: Number(r.cache ?? 0),
       streamCount: Number(r.stream ?? 0),
       clientGone: Number(r.client_gone ?? 0),
-      models: Number(r.models ?? 0),
-      channels: Number(r.channels ?? 0),
-      users: Number(r.users ?? 0),
-      tokens: Number(r.tokens ?? 0),
-      groups: Number(r.groups ?? 0),
+      models: Number(d?.models ?? 0),
+      channels: Number(d?.channels ?? 0),
+      users: Number(d?.users ?? 0),
+      tokens: Number(d?.tokens ?? 0),
+      groups: Number(d?.groups ?? 0),
       useTime: Number(r.use_time ?? 0),
       frtSum: Number(r.frt_sum ?? 0),
       frtCount: Number(r.frt_count ?? 0),
-      firstEntry: r.first_entry ? Number(r.first_entry) * 1000 : null,
-      lastEntry: r.last_entry ? Number(r.last_entry) * 1000 : null,
+      firstEntry: d?.first_entry ? Number(d.first_entry) * 1000 : null,
+      lastEntry: d?.last_entry ? Number(d.last_entry) * 1000 : null,
     };
   }
 
