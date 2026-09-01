@@ -23,6 +23,8 @@ import { registerCostRoutes } from './routes/cost.js';
 import { registerLogRoutes } from './routes/logs.js';
 import { registerHealthRoutes, type HealthDeps } from './routes/health.js';
 import { registerAlertRoutes } from './routes/alerts.js';
+import { registerDashboardRoutes } from './routes/dashboard.js';
+import { registerCostAnalyticsRoutes } from './routes/cost-analytics.js';
 import { registerMetricsRoutes, trackHttpRequest } from './metrics.js';
 
 const log = createLogger('api');
@@ -44,6 +46,8 @@ function buildRouteRegistrars(
     (app) => registerCostRoutes(app, store, engine),
     (app) => registerLogRoutes(app, store),
     (app) => registerAlertRoutes(app, engine),
+    (app) => registerDashboardRoutes(app, store),
+    (app) => registerCostAnalyticsRoutes(app, store),
     (app) => registerMetricsRoutes(app, store),
   ];
 }

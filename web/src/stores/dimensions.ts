@@ -1,0 +1,52 @@
+import { defineStore } from 'pinia';
+import { ref } from 'vue';
+import { api } from '@/api';
+import type { DimensionResponse, DimensionSort, DimensionType } from '@/api/types';
+import { useAppStore } from './app';
+
+/** 维度分析：类型切换、排序、分页（时间范围随全局） */
+export const useDimensionsStore = defineStore('dimensions', () => {
+  const type = ref<DimensionType>('model');
+  const sort = ref<DimensionSort>('requests');
+  const data = ref<DimensionResponse | null>(null);
+  const loading = ref(false);
+  const limit = ref(20);
+  const offset = ref(0);
+
+  async function load(): Promise<void> {
+    loading.value = true;
+    try {
+      const app = useAppStore();
+      const now = Date.now();
+      const start = now - app.rangeHours * 3_600_000;
+      data.value = await api.dimension.get(type.value, {
+        sort: sort.value,
+        limit: limit.value,
+        offset: offset.value,
+        start,
+        end: now,
+      });
+    } finally {
+      loading.value = false;
+    }
+  }
+
+  async function setType(t: DimensionType): Promise<void> {
+    type.value = t;
+    offset.value = 0;
+    await load();
+  }
+
+  async function setSort(s: DimensionSort): Promise<void> {
+    sort.value = s;
+    offset.value = 0;
+    await load();
+  }
+
+  async function goTo(page: number): Promise<void> {
+    offset.value = (page - 1) * limit.value;
+    await load();
+  }
+
+  return { type, sort, data, loading, limit, offset, load, setType, setSort, goTo };
+});

@@ -100,4 +100,17 @@ export function registerLogRoutes(app: ApiApp, store: IStore): void {
       data: res.data.filter(isConsume).map(formatConsume),
     };
   });
+
+  // 筛选器候选值：模型/渠道/用户的 Top-N 去重列表（供前端下拉框）
+  app.get('/logs/facets', async () => {
+    const facet = (dimension: 'model' | 'channel' | 'user') =>
+      store
+        .getDimensionStats(dimension, { sort: 'requests', limit: 50 })
+        .data.map((d) => ({ key: d.key, requests: d.requests }));
+    return {
+      models: facet('model'),
+      channels: facet('channel'),
+      users: facet('user'),
+    };
+  });
 }

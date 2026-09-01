@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import AppShell from './components/layout/AppShell.vue';
-import { useAppStore } from './stores/app';
+import { onBeforeUnmount, onMounted } from 'vue';
+import AppShell from '@/components/layout/AppShell.vue';
+import { useRealtimeStore } from '@/stores/realtime';
 
-useAppStore().init();
+const realtime = useRealtimeStore();
+
+onMounted(() => realtime.connect());
+onBeforeUnmount(() => realtime.disconnect());
 </script>
 
 <template>
-  <AppShell>
-    <RouterView />
-  </AppShell>
+  <AppShell />
 </template>

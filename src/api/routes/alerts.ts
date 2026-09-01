@@ -1,6 +1,7 @@
 import type { ApiApp } from '../app-type.js';
 import type { AnalysisEngine } from '../../engine/registry.js';
 import { getIpLocation } from '../../utils/geo.js';
+import { z } from 'zod';
 
 interface HighRiskIpSummary {
   ip: string;
@@ -24,12 +25,19 @@ interface WhaleRecordSummary {
   completionTokens: number;
 }
 
+const severityQuery = z.object({
+  severity: z.enum(['info', 'warning', 'critical']).optional(),
+});
+
 export function registerAlertRoutes(
   app: ApiApp,
   engine: AnalysisEngine,
 ): void {
-  app.get('/alerts', async () => {
-    const alerts = engine.checkAlerts().map((a) => {
+  app.get('/alerts', { schema: { querystring: severityQuery } }, async (request) => {
+    const sev = request.query.severity;
+    const alerts = engine.checkAlerts()
+      .filter((a) => !sev || a.severity === sev)
+      .map((a) => {
       if (a.details && typeof a.details.ip === 'string') {
         return {
           ...a,

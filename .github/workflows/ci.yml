@@ -51,3 +51,7 @@ jobs:
       - name: Build Frontend
         run: pnpm run build
         working-directory: web
+
+      - name: Dependency audit (Frontend)
+        run: pnpm audit --prod
+        working-directory: web

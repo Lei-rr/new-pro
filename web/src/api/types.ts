@@ -1,24 +1,17 @@
-// ─── 与后端 DTO 一一对应 ───
+// ─── 领域类型：与后端 DTO 严格对齐 ───
 
 export interface OverviewSummary {
-  /** 全部 HTTP 请求数（来自 GIN 日志） */
   totalRequests: number;
-  /** 计费请求数（consume 记录） */
   billingRequests: number;
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalQuota: number;
   totalCost: number;
-  /** HTTP 请求失败数（GIN status >= 400） */
   errorCount: number;
-  /** 错误日志行数（ERR 行，渠道级诊断） */
   errorLogCount: number;
   errorRate: number;
-  /** Prompt 缓存命中率 (cache_tokens / prompt_tokens) */
   cacheHitRate: number;
-  /** 流式请求比例 */
   streamRatio: number;
-  /** 客户端主动取消数 (client_gone) */
   clientGoneCount: number;
   activeModels: number;
   activeChannels: number;
@@ -68,9 +61,9 @@ export interface DimensionStats {
 export interface DimensionResponse {
   dimension: string;
   total: number;
-  offset?: number;
-  limit?: number;
-  count?: number;
+  offset: number;
+  limit: number;
+  count: number;
   data: DimensionStats[];
 }
 
@@ -87,14 +80,24 @@ export interface CostSummary {
   totalRequests: number;
   billingRequests: number;
   avgCostPerRequest: number;
-  pluginDetails: {
-    totalQuota?: number;
-    totalCost?: number;
-    totalRequests?: number;
-    todayQuota?: number;
-    todayCost?: number;
-    avgCostPerRequest?: number;
-  };
+  pluginDetails: Record<string, unknown>;
+}
+
+export type AlertSeverity = 'info' | 'warning' | 'critical';
+
+export interface Alert {
+  id: string;
+  ruleId: string;
+  severity: AlertSeverity;
+  message: string;
+  timestamp: number;
+  details?: Record<string, unknown>;
+}
+
+export interface AlertsResponse {
+  count: number;
+  alerts: Alert[];
+  summaries: Record<string, Record<string, unknown>>;
 }
 
 export interface LogEntry {
@@ -102,7 +105,7 @@ export interface LogEntry {
   requestId: string;
   userId: number;
   ip: string | null;
-  ipLocation?: string;
+  ipLocation: string | null;
   channelId: number;
   model: string;
   tokenName: string;
@@ -130,6 +133,14 @@ export interface LogEntry {
   adminUseChannel: string[] | null;
 }
 
+export interface LogListResponse {
+  total: number;
+  count: number;
+  offset: number;
+  limit: number;
+  data: LogEntry[];
+}
+
 export interface LogSearchFilter {
   q?: string;
   model?: string;
@@ -142,31 +153,6 @@ export interface LogSearchFilter {
   offset?: number;
 }
 
-export interface LogListResponse {
-  total: number;
-  count: number;
-  offset?: number;
-  limit?: number;
-  data: LogEntry[];
-}
-
-export type AlertSeverity = 'info' | 'warning' | 'critical';
-
-export interface Alert {
-  id: string;
-  ruleId: string;
-  severity: AlertSeverity;
-  message: string;
-  timestamp: number;
-  details?: Record<string, unknown>;
-}
-
-export interface AlertsResponse {
-  count: number;
-  alerts: Alert[];
-  summaries: Record<string, Record<string, unknown>>;
-}
-
 export interface HealthInfo {
   status: string;
   uptime: number;
@@ -176,21 +162,70 @@ export interface HealthInfo {
   timestamp: number;
 }
 
-// ─── WebSocket 消息 ───
+// ─── 聚合端点（前端每页一次请求） ───
 
-export interface WsSnapshotData {
+export interface DashboardResponse {
+  hours: number;
+  start: number;
+  end: number;
   summary: OverviewSummary;
-  plugins: Record<string, Record<string, unknown>>;
-  alerts: Alert[];
+  prevSummary: OverviewSummary;
+  timeline: TimelineBucket[];
+  topModels: DimensionStats[];
+  topChannels: DimensionStats[];
+  topUsers: DimensionStats[];
 }
 
-export interface WsStatsUpdateData {
-  summary: OverviewSummary;
-  alerts: Alert[];
+export interface CostAnalyticsResponse {
+  totalQuota: number;
+  totalCost: number;
+  billingRequests: number;
+  avgCostPerRequest: number;
+  todayCost: number;
+  todayRequests: number;
+  trend: CostTrendPoint[];
+  tokenTop: DimensionStats[];
+  modelTop: DimensionStats[];
 }
 
-export type WsMessage =
-  | { type: 'snapshot'; data: WsSnapshotData }
-  | { type: 'stats_update'; data: WsStatsUpdateData }
-  | { type: 'new_logs'; data: unknown[] }
-  | { type: 'alert'; data: Alert };
+export interface LogFacet {
+  key: string;
+  requests: number;
+}
+
+export interface LogFacetsResponse {
+  models: LogFacet[];
+  channels: LogFacet[];
+  users: LogFacet[];
+}
+
+// ─── WS 消息 ───
+
+export interface WsSnapshot {
+  type: 'snapshot';
+  data: {
+    summary: OverviewSummary;
+    plugins: Record<string, Record<string, unknown>>;
+    alerts: Alert[];
+  };
+}
+
+export interface WsStatsUpdate {
+  type: 'stats_update';
+  data: {
+    summary: OverviewSummary;
+    alerts: Alert[];
+  };
+}
+
+export interface WsNewLogs {
+  type: 'new_logs';
+  data: LogEntry[];
+}
+
+export interface WsAlert {
+  type: 'alert';
+  data: Alert;
+}
+
+export type WsMessage = WsSnapshot | WsStatsUpdate | WsNewLogs | WsAlert;
