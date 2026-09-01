@@ -69,7 +69,14 @@ export async function createApp(
 
   // ─── Global plugins ───
   await app.register(sensible);
-  await app.register(helmet);
+  // Dashboard is served over plain HTTP (possibly behind an injecting proxy):
+  // the default CSP's `upgrade-insecure-requests` would break asset loading
+  // (https upgrade on an http origin) and `script-src 'self'` would block
+  // proxied inline scripts. Keep the other security headers.
+  await app.register(helmet, {
+    contentSecurityPolicy: false,
+    crossOriginOpenerPolicy: false,
+  });
   await app.register(websocket, {
     options: {
       // Accept the 'api_key.<token>' subprotocol so the key is not exposed
