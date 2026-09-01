@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, watch } from 'vue';
-import { Search, X } from '@lucide/vue';
+import { ChevronLeft, ChevronRight, Search, X } from '@lucide/vue';
 import { useLogsStore } from '@/stores/logs';
 import { useAppStore } from '@/stores/app';
 import { formatCost, formatNumber, formatTime } from '@/lib/formatters';
