@@ -4,7 +4,7 @@ import { api } from '@/api';
 import type { Alert, DimensionStats, OverviewSummary, TimelineBucket } from '@/api/types';
 import { useAppStore } from './app';
 
-/** 总览数据：单次聚合请求（/dashboard，自然日窗口） + WS 实时刷新 */
+/** 总览数据：单次聚合请求（/dashboard，自然日窗口） */
 export const useOverviewStore = defineStore('overview', () => {
   const summary = ref<OverviewSummary | null>(null);
   const prevSummary = ref<OverviewSummary | null>(null);
@@ -18,10 +18,9 @@ export const useOverviewStore = defineStore('overview', () => {
 
   async function load(): Promise<void> {
     const app = useAppStore();
-    const days = app.rangeDays;
     loading.value = true;
     try {
-      const res = await api.overview.dashboard(days);
+      const res = await api.overview.dashboard(app.rangeDays);
       summary.value = res.summary;
       prevSummary.value = res.prevSummary;
       timeline.value = res.timeline;

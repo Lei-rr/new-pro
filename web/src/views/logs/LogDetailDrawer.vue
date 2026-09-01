@@ -17,7 +17,6 @@ const details = () => {
     { label: '令牌', value: e.tokenName ?? '—' },
     { label: '分组', value: e.group ?? '—' },
     { label: '流式', value: e.isStream ? '是' : '否' },
-    { label: 'IP', value: e.ip ?? '—' },
   ];
   if (e.kind === 'consume') {
     items.push(

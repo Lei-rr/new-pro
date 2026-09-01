@@ -28,8 +28,6 @@ const SORTS = [
   { value: 'tokens', label: 'Tokens' },
   { value: 'quota', label: 'Quota' },
   { value: 'cost', label: '成本' },
-  { value: 'errors', label: '错误数' },
-  { value: 'frt', label: '平均 FRT' },
 ] as const;
 
 /** 当前时间范围标题（自然日） */
@@ -116,8 +114,7 @@ const barChart = computed<EChartsCoreOption>(() => ({
               <TableHead class="text-right text-xs">请求</TableHead>
               <TableHead class="text-right text-xs">Tokens</TableHead>
               <TableHead class="text-right text-xs">成本</TableHead>
-              <TableHead class="text-right text-xs">错误</TableHead>
-              <TableHead class="text-right text-xs">FRT</TableHead>
+              <TableHead class="text-right text-xs">平均耗时</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -128,11 +125,10 @@ const barChart = computed<EChartsCoreOption>(() => ({
               <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.requests) }}</TableCell>
               <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.totalTokens) }}</TableCell>
               <TableCell class="text-right text-xs tabular-nums">{{ formatCost(d.cost) }}</TableCell>
-              <TableCell class="text-right text-xs tabular-nums">{{ formatNumber(d.errors) }}</TableCell>
-              <TableCell class="text-right text-xs tabular-nums">{{ d.avgFrt ? `${d.avgFrt.toFixed(0)}ms` : '—' }}</TableCell>
+              <TableCell class="text-right text-xs tabular-nums">{{ d.avgUseTime ? `${d.avgUseTime.toFixed(1)}s` : '—' }}</TableCell>
             </TableRow>
             <TableRow v-if="!store.loading && !(store.data?.data ?? []).length">
-              <TableCell colspan="6" class="py-10 text-center text-xs text-muted-foreground">暂无数据</TableCell>
+              <TableCell colspan="5" class="py-10 text-center text-xs text-muted-foreground">暂无数据</TableCell>
             </TableRow>
           </TableBody>
         </Table>

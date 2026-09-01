@@ -18,18 +18,9 @@ const logs = useLogsStore();
 onMounted(() => {
   overview.load();
   realtime.onLogs((entries) => logs.appendLive(entries));
-  // 实时刷新 KPI：后端按窗口推送 summary（无额外请求）
-  realtime.onSummary((s) => {
-    if (overview.summary) overview.summary = s;
-  });
-  // 告知后端窗口范围（自然日）
-  realtime.sendRange(app.rangeDays);
 });
 
-watch(() => app.rangeDays, () => {
-  overview.load();
-  realtime.sendRange(app.rangeDays);
-});
+watch(() => app.rangeDays, () => overview.load());
 
 const s = computed(() => overview.summary);
 
@@ -45,7 +36,7 @@ const requestChart = computed<EChartsCoreOption>(() => ({
   yAxis: { type: 'value', splitLine: { lineStyle: { opacity: 0.15 } } },
   series: [
     { name: '请求', type: 'bar', data: overview.timeline.map((b) => b.requests), barWidth: 6, itemStyle: { borderRadius: [3, 3, 0, 0] } },
-    { name: '错误', type: 'line', smooth: true, symbol: 'none', data: overview.timeline.map((b) => b.errors), lineStyle: { width: 1.5 } },
+    { name: 'Tokens', type: 'line', smooth: true, symbol: 'none', data: overview.timeline.map((b) => b.promptTokens + b.completionTokens), lineStyle: { width: 1.5 } },
   ],
 }));
 
@@ -59,10 +50,10 @@ const channelHealth = computed(() => overview.channelHealth.slice(0, 5));
     <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
       <StatCard
         title="计费请求"
-        :value="formatNumber(s?.totalRequests)"
+        :value="formatNumber(s?.billingRequests)"
         icon="activity"
-        :delta="overview.delta('totalRequests')"
-        :hint="`计费 ${formatNumber(s?.billingRequests)}`"
+        :delta="overview.delta('billingRequests')"
+        :hint="`流式 ${formatPercent(s?.streamRatio, 1)}`"
         :loading="overview.loading"
         positive-is-good
       />
@@ -83,16 +74,15 @@ const channelHealth = computed(() => overview.channelHealth.slice(0, 5));
         :loading="overview.loading"
       />
       <StatCard
-        title="平均响应时间"
-        :value="s ? `${s.avgResponseTime.toFixed(2)}s` : '—'"
+        title="平均耗时"
+        :value="s ? `${s.avgUseTime.toFixed(1)}s` : '—'"
         icon="clock"
-        :delta="overview.delta('avgResponseTime')"
-        :hint="`平均 FRT ${s?.avgFrt ? s.avgFrt.toFixed(0) + 'ms' : '—'}`"
+        :delta="overview.delta('avgUseTime')"
         :loading="overview.loading"
       />
     </div>
 
-    <!-- KPI 第二行：LLM 效率指标 -->
+    <!-- KPI 第二行 -->
     <div class="grid grid-cols-2 gap-4 xl:grid-cols-4">
       <StatCard
         title="Prompt Tokens"
@@ -103,25 +93,23 @@ const channelHealth = computed(() => overview.channelHealth.slice(0, 5));
         positive-is-good
       />
       <StatCard
-        title="缓存命中率"
-        :value="formatPercent(s?.cacheHitRate, 1)"
-        icon="zap"
-        :hint="`命中 ${formatNumber(s?.cacheHitTokens)} tokens`"
+        title="活跃模型"
+        :value="formatNumber(s?.activeModels)"
+        icon="cpu"
+        :hint="`渠道 ${formatNumber(s?.activeChannels)}`"
         :loading="overview.loading"
-        positive-is-good
       />
       <StatCard
-        title="流式比例"
-        :value="formatPercent(s?.streamRatio, 1)"
-        icon="layers"
-        :loading="overview.loading"
-        positive-is-good
-      />
-      <StatCard
-        title="活跃规模"
-        :value="`${formatNumber(s?.activeModels)} / ${formatNumber(s?.activeUsers)}`"
+        title="活跃用户"
+        :value="formatNumber(s?.activeUsers)"
         icon="users"
-        :hint="`模型/用户 · 渠道 ${formatNumber(s?.activeChannels)} · IP ${formatNumber(s?.activeIps)}`"
+        :hint="`令牌 ${formatNumber(s?.activeTokens)} · 分组 ${formatNumber(s?.activeGroups)}`"
+        :loading="overview.loading"
+      />
+      <StatCard
+        title="窗口覆盖"
+        :value="s?.firstEntry && s?.lastEntry ? `${formatTime(s.firstEntry)} ~ ${formatTime(s.lastEntry)}` : '—'"
+        icon="database"
         :loading="overview.loading"
       />
     </div>

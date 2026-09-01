@@ -17,17 +17,11 @@ export const useDimensionsStore = defineStore('dimensions', () => {
     loading.value = true;
     try {
       const app = useAppStore();
-      const now = Date.now();
-      // 自然日对齐：今天 00:00（本地时区）往前 N-1 天
-      const startOfToday = new Date();
-      startOfToday.setHours(0, 0, 0, 0);
-      const start = startOfToday.getTime() - (app.rangeDays - 1) * 86_400_000;
       data.value = await api.dimension.get(type.value, {
         sort: sort.value,
         limit: limit.value,
         offset: offset.value,
-        start,
-        end: now,
+        days: app.rangeDays,
       });
     } finally {
       loading.value = false;

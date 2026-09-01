@@ -3,16 +3,12 @@ import type {
   AlertsResponse,
   AlertSeverity,
   CostAnalyticsResponse,
-  CostSummary,
-  CostTrendPoint,
   DashboardResponse,
   DimensionResponse,
   DimensionSort,
   DimensionType,
   HealthInfo,
   RawLogResponse,
-  OverviewSummary,
-  TimelineBucket,
 } from './types';
 
 /** 后端端点按域组织（/api/v1） */
@@ -24,48 +20,35 @@ export const api = {
   },
 
   overview: {
-    summary(start?: number, end?: number): Promise<OverviewSummary> {
-      return request('/api/v1/overview/summary', { start, end });
-    },
-    timeline(hours = 24): Promise<TimelineBucket[]> {
-      return request('/api/v1/overview/timeline', { hours });
-    },
     /** 总览页聚合：KPI（含上期）+ 时间线 + Top 榜，一次请求 */
-    dashboard(hours = 24): Promise<DashboardResponse> {
-      return request('/api/v1/dashboard', { hours });
+    dashboard(days = 7): Promise<DashboardResponse> {
+      return request('/api/v1/dashboard', { days });
     },
   },
 
   dimension: {
     get(
       type: DimensionType,
-      opts: { sort?: DimensionSort; limit?: number; offset?: number; start?: number; end?: number } = {},
+      opts: { sort?: DimensionSort; limit?: number; offset?: number; days?: number } = {},
     ): Promise<DimensionResponse> {
       return request(`/api/v1/dimension/${type}`, {
         sort: opts.sort,
         limit: opts.limit,
         offset: opts.offset,
-        start: opts.start,
-        end: opts.end,
+        days: opts.days,
       });
     },
   },
 
   cost: {
-    summary(): Promise<CostSummary> {
-      return request('/api/v1/cost/summary');
-    },
-    trend(days = 14): Promise<CostTrendPoint[]> {
-      return request('/api/v1/cost/trend', { days });
-    },
     /** 成本页聚合：KPI + 趋势 + Token/模型消耗榜，一次请求 */
-    analytics(days = 14): Promise<CostAnalyticsResponse> {
+    analytics(days = 7): Promise<CostAnalyticsResponse> {
       return request('/api/v1/cost/analytics', { days });
     },
   },
 
   logs: {
-    /** 原始日志流（PG logs 表；kind: all/consume/error/sys/success/failure） */
+    /** 原始日志流（PG logs 表；kind: all/consume/error/sys） */
     stream(filter: {
       kind?: string;
       q?: string;

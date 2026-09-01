@@ -2,17 +2,12 @@
 import { computed, onMounted } from 'vue';
 import { CircleAlert, Info, TriangleAlert } from '@lucide/vue';
 import { useAlertsStore } from '@/stores/alerts';
-import { useRealtimeStore } from '@/stores/realtime';
 import { formatDateTime } from '@/lib/formatters';
 import type { AlertSeverity } from '@/api/types';
 
 const store = useAlertsStore();
-const realtime = useRealtimeStore();
 
-onMounted(() => {
-  store.load();
-  realtime.onAlert((a) => store.pushLive(a));
-});
+onMounted(() => store.load());
 
 const SEVERITY_META: Record<AlertSeverity, { label: string; icon: typeof Info; class: string }> = {
   critical: { label: '严重', icon: TriangleAlert, class: 'border-red-500/30 bg-red-500/5 text-red-600 dark:text-red-400' },
