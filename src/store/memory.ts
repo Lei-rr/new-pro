@@ -4,11 +4,11 @@ import { getEnv } from '../env.js';
 import type { ParsedLogEntry, ConsumeLogEntry, GinLogEntry, ErrorLogEntry } from '../types/log.js';
 import { isConsume, isGin, isError } from '../types/log.js';
 import { QUOTA_PER_COST_UNIT } from '../constants.js';
-import { hourKeyToEpochMs, toDateString, toHourKey } from '../utils/time.js';
+import { hourKeyToEpochMs, minuteKeyToEpochMs, toDateString, toHourKey, toMinuteKey } from '../utils/time.js';
 import type { IStore, LogSearchFilter, RawLogFilter } from './interface.js';
 import type { DimensionType, DimensionQuery, DimensionStats, TimelineBucket, OverviewSummary, CostTrendPoint } from '../types/stats.js';
 import { DimensionIndex } from './indexes.js';
-import { newBucket, type HourBucket } from './buckets.js';
+import { newBucket, newMinuteBucket, type HourBucket, type MinuteBucket } from './buckets.js';
 import { RequestCorrelator } from './correlation.js';
 import { ReplayGuard } from './dedup.js';
 
@@ -16,6 +16,10 @@ const log = createLogger('store');
 
 /** Raw log viewer ring buffer capacity. */
 const RAW_LOG_BUFFER_MAX = 200_000;
+
+/** Retain minute buckets for up to 12 hours (sliding windows ≤ 6h). */
+const MINUTE_BUCKET_RETENTION_MS = 12 * 3_600_000;
+
 
 /**
  * In-memory store with multi-dimension indexes and bidirectional IP correlation.
@@ -47,6 +51,7 @@ export class MemoryStore implements IStore, Lifecycle {
 
   // Time buckets
   private hourly = new Map<string, HourBucket>();
+  private minuteBuckets = new Map<string, MinuteBucket>();
   private dailyCost = new Map<string, { quota: number; requests: number }>();
 
   // Global counters (monotonic since startup; unaffected by eviction)
@@ -185,6 +190,26 @@ export class MemoryStore implements IStore, Lifecycle {
     bucket.users.add(e.userId);
     if (p.group) bucket.groups.add(p.group);
 
+    // Minute bucket (exact sliding windows)
+    const mk = toMinuteKey(e.timestamp, this.tz);
+    let mb = this.minuteBuckets.get(mk);
+    if (!mb) {
+      mb = newMinuteBucket();
+      this.minuteBuckets.set(mk, mb);
+    }
+    mb.consumes++;
+    if (p.is_stream) mb.streamCount++;
+    if (p.other?.stream_status?.end_reason === 'client_gone') mb.clientGoneCount++;
+    mb.promptTokens += p.prompt_tokens;
+    mb.completionTokens += p.completion_tokens;
+    mb.quota += p.quota;
+    mb.cacheTokens += p.other?.cache_tokens ?? 0;
+    mb.totalTime += p.use_time_seconds;
+    if (frt > 0) {
+      mb.frtSum += frt;
+      mb.frtCount++;
+    }
+
     // Daily cost
     const dk = toDateString(e.timestamp, this.tz);
     let day = this.dailyCost.get(dk);
@@ -226,6 +251,16 @@ export class MemoryStore implements IStore, Lifecycle {
     bucket.requests++;
     bucket.ginDurationMs += e.durationMs;
 
+    // Minute bucket (exact sliding windows)
+    const mk = toMinuteKey(e.timestamp, this.tz);
+    let mb = this.minuteBuckets.get(mk);
+    if (!mb) {
+      mb = newMinuteBucket();
+      this.minuteBuckets.set(mk, mb);
+    }
+    mb.requests++;
+    mb.ginDurationMs += e.durationMs;
+
     if (e.routeType === 'relay') {
       // Correlate with the consume entry (either side may have arrived first).
       // One relay request → one request count (GIN is the source of truth),
@@ -241,6 +276,7 @@ export class MemoryStore implements IStore, Lifecycle {
     if (e.statusCode >= 400) {
       this.totalErrors++;
       bucket.errors++;
+      if (mb) mb.errors++;
       if (e.routeType === 'relay') {
         this.indexes.ip.addError(e.ip, e.timestamp.getTime());
       }
@@ -267,6 +303,15 @@ export class MemoryStore implements IStore, Lifecycle {
       this.hourly.set(hk, bucket);
     }
     bucket.errorLogCount++;
+
+    // Minute bucket (exact sliding windows)
+    const mk = toMinuteKey(e.timestamp, this.tz);
+    let mb = this.minuteBuckets.get(mk);
+    if (!mb) {
+      mb = newMinuteBucket();
+      this.minuteBuckets.set(mk, mb);
+    }
+    mb.errorLogCount++;
 
     // Attribute channel failures (e.g. "channel error (channel #31, status code: 503)")
     const channelMatch = msg.match(/channel\s*#(\d+)/i);
@@ -297,6 +342,12 @@ export class MemoryStore implements IStore, Lifecycle {
 
     for (const key of this.hourly.keys()) {
       if (hourKeyToEpochMs(key, this.tz) < bucketCutoff) this.hourly.delete(key);
+    }
+
+    // Minute buckets: only needed for short sliding windows
+    const minuteCutoff = now - MINUTE_BUCKET_RETENTION_MS;
+    for (const key of this.minuteBuckets.keys()) {
+      if (minuteKeyToEpochMs(key, this.tz) < minuteCutoff) this.minuteBuckets.delete(key);
     }
 
     // Keep daily cost for the maximum queryable window (90 days)
@@ -344,9 +395,12 @@ export class MemoryStore implements IStore, Lifecycle {
       };
     }
 
-    // Time-range aggregated summary from hourly buckets
+    // Time-range aggregated summary.
+    // Short windows (<= 6h) aggregate minute buckets for exact sliding
+    // semantics; longer windows fall back to hourly buckets (cheap scans).
     const startMs = start ?? 0;
     const endMs = end ?? Date.now();
+    const windowMs = endMs - startMs;
 
     let requests = 0;
     let errors = 0;
@@ -369,29 +423,64 @@ export class MemoryStore implements IStore, Lifecycle {
     const users = new Set<number>();
     const groups = new Set<string>();
 
-    for (const [key, b] of this.hourly) {
-      const t = hourKeyToEpochMs(key, this.tz);
-      if (t < startMs || t > endMs) continue;
-      if (firstBucketMs === null || t < firstBucketMs) firstBucketMs = t;
-      if (lastBucketMs === null || t > lastBucketMs) lastBucketMs = t;
-      requests += b.requests;
-      errors += b.errors;
-      consumes += (b.consumes ?? 0);
-      streamCount += (b.streamCount ?? 0);
-      clientGoneCount += (b.clientGoneCount ?? 0);
-      promptTokens += b.promptTokens;
-      completionTokens += b.completionTokens;
-      quota += b.quota;
-      cacheTokens += b.cacheTokens;
-      ginDurationMs += b.ginDurationMs;
-      errorLogCount += b.errorLogCount;
-      frtSum += (b.frtSum ?? 0);
-      frtCount += (b.frtCount ?? 0);
-      for (const m of b.models) models.add(m);
-      for (const c of b.channels) channels.add(c);
-      for (const tk of b.tokens) tokens.add(tk);
-      for (const u of b.users) users.add(u);
-      for (const g of b.groups) groups.add(g);
+    if (windowMs <= 6 * 3_600_000) {
+      // Minute-bucket aggregation (exact sliding window)
+      for (const [key, mb] of this.minuteBuckets) {
+        const t = minuteKeyToEpochMs(key, this.tz);
+        if (t < startMs || t > endMs) continue;
+        if (firstBucketMs === null || t < firstBucketMs) firstBucketMs = t;
+        if (lastBucketMs === null || t > lastBucketMs) lastBucketMs = t;
+        requests += mb.requests;
+        errors += mb.errors;
+        consumes += mb.consumes;
+        streamCount += mb.streamCount;
+        clientGoneCount += mb.clientGoneCount;
+        promptTokens += mb.promptTokens;
+        completionTokens += mb.completionTokens;
+        quota += mb.quota;
+        cacheTokens += mb.cacheTokens;
+        ginDurationMs += mb.ginDurationMs;
+        errorLogCount += mb.errorLogCount;
+        frtSum += mb.frtSum;
+        frtCount += mb.frtCount;
+      }
+      // Distinct-value sets are only kept in hourly buckets; approximate
+      // them with the covered hourly buckets (activity metrics).
+      for (const [key, b] of this.hourly) {
+        const t = hourKeyToEpochMs(key, this.tz);
+        if (t + 3_600_000 < startMs || t > endMs) continue;
+        for (const m of b.models) models.add(m);
+        for (const c of b.channels) channels.add(c);
+        for (const tk of b.tokens) tokens.add(tk);
+        for (const u of b.users) users.add(u);
+        for (const g of b.groups) groups.add(g);
+      }
+    } else {
+      // Hourly-bucket aggregation (long ranges)
+      for (const [key, b] of this.hourly) {
+        const t = hourKeyToEpochMs(key, this.tz);
+        if (t < startMs || t > endMs) continue;
+        if (firstBucketMs === null || t < firstBucketMs) firstBucketMs = t;
+        if (lastBucketMs === null || t > lastBucketMs) lastBucketMs = t;
+        requests += b.requests;
+        errors += b.errors;
+        consumes += (b.consumes ?? 0);
+        streamCount += (b.streamCount ?? 0);
+        clientGoneCount += (b.clientGoneCount ?? 0);
+        promptTokens += b.promptTokens;
+        completionTokens += b.completionTokens;
+        quota += b.quota;
+        cacheTokens += b.cacheTokens;
+        ginDurationMs += b.ginDurationMs;
+        errorLogCount += b.errorLogCount;
+        frtSum += (b.frtSum ?? 0);
+        frtCount += (b.frtCount ?? 0);
+        for (const m of b.models) models.add(m);
+        for (const c of b.channels) channels.add(c);
+        for (const tk of b.tokens) tokens.add(tk);
+        for (const u of b.users) users.add(u);
+        for (const g of b.groups) groups.add(g);
+      }
     }
 
     return {

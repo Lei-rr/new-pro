@@ -269,4 +269,19 @@ describe('MemoryStore', () => {
     expect(s.firstEntry).not.toBeNull();
     expect(s.lastEntry).not.toBeNull();
   });
+
+  it('sliding 1h window excludes entries older than the boundary (minute buckets)', () => {
+    const store = new MemoryStore();
+    const now = Date.now();
+    // 61 分钟前：必须在窗口外
+    store.append(gin({ requestId: 'old', ip: '9.9.9.9', timestamp: new Date(now - 61 * 60_000) }));
+    store.append(consume({ requestId: 'old', timestamp: new Date(now - 61 * 60_000) }));
+    // 10 分钟前：必须在窗口内
+    store.append(gin({ requestId: 'new', ip: '8.8.8.8', timestamp: new Date(now - 10 * 60_000) }));
+    store.append(consume({ requestId: 'new', timestamp: new Date(now - 10 * 60_000) }));
+
+    const s = store.getSummary(now - 60 * 60_000, now);
+    expect(s.totalRequests).toBe(1);
+    expect(s.billingRequests).toBe(1);
+  });
 });
