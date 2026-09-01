@@ -4,8 +4,8 @@ import { ChevronLeft, ChevronRight, Search } from '@lucide/vue';
 import { useLogsStore } from '@/stores/logs';
 import { useAppStore } from '@/stores/app';
 import { useRealtimeStore } from '@/stores/realtime';
-import { formatDateTime, formatNumber, formatTime } from '@/lib/formatters';
-import type { RawLogKind, RawLogEntry } from '@/api/types';
+import { formatCost, formatDateTime, formatNumber, formatTime } from '@/lib/formatters';
+import type { RawLogEntry, RawLogKind } from '@/api/types';
 import LogDetailDrawer from './LogDetailDrawer.vue';
 
 const store = useLogsStore();
@@ -21,29 +21,34 @@ watch(() => app.rangeHours, () => store.search(true));
 
 const KINDS: Array<{ value: RawLogKind; label: string }> = [
   { value: 'all', label: '全部' },
-  { value: 'success', label: '成功' },
-  { value: 'failure', label: '失败' },
-  { value: 'gin', label: 'HTTP' },
   { value: 'consume', label: '计费' },
+  { value: 'gin', label: 'HTTP' },
   { value: 'error', label: '错误' },
+  { value: 'sys', label: '系统' },
 ];
 
 const totalPages = computed(() => Math.max(1, Math.ceil(store.total / store.limit)));
 const currentPage = computed(() => Math.floor(store.offset / store.limit) + 1);
 
-function levelClass(e: RawLogEntry): string {
-  if (e.kind === 'error') return 'text-red-600 dark:text-red-400';
-  if (e.kind === 'gin') return e.success ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400';
-  if (e.kind === 'consume') return 'text-sky-600 dark:text-sky-400';
-  return 'text-muted-foreground';
+function consumeDetail(l: RawLogEntry): Record<string, unknown> {
+  return (l.detail as Record<string, unknown>) ?? {};
 }
 
-function levelLabel(e: RawLogEntry): string {
-  if (e.kind === 'error') return 'ERR';
-  if (e.kind === 'gin') return e.success ? 'OK' : 'HTTP';
-  if (e.kind === 'consume') return '计费';
-  if (e.kind === 'sys') return 'SYS';
-  return 'INFO';
+function typeBadge(l: RawLogEntry): { label: string; class: string } {
+  switch (l.kind) {
+    case 'consume':
+      return { label: '计费', class: 'bg-sky-500/10 text-sky-600 dark:text-sky-400' };
+    case 'gin':
+      return l.success
+        ? { label: 'HTTP', class: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' }
+        : { label: 'HTTP', class: 'bg-red-500/10 text-red-600 dark:text-red-400' };
+    case 'error':
+      return { label: '错误', class: 'bg-red-500/10 text-red-600 dark:text-red-400' };
+    case 'sys':
+      return { label: '系统', class: 'bg-muted text-muted-foreground' };
+    default:
+      return { label: '信息', class: 'bg-muted text-muted-foreground' };
+  }
 }
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null;
@@ -63,7 +68,7 @@ function onSearchInput(v: string): void {
           <Input
             :model-value="store.q"
             class="h-8 pl-8 text-xs"
-            placeholder="搜索模型 / 令牌 / IP / 路径…"
+            placeholder="搜索模型 / 令牌 / 用户 / IP / 路径 / 请求ID…"
             @update:model-value="onSearchInput"
           />
         </div>
@@ -83,7 +88,7 @@ function onSearchInput(v: string): void {
       </div>
     </Card>
 
-    <!-- 日志流 -->
+    <!-- NewAPI 风格日志表格 -->
     <Card class="p-0">
       <div class="flex items-center justify-between border-b border-border px-4 py-3">
         <p class="text-xs text-muted-foreground">
@@ -95,23 +100,73 @@ function onSearchInput(v: string): void {
         </span>
       </div>
 
-      <!-- 流式列表（NewAPI 原始日志风格） -->
-      <div class="flex flex-col font-mono text-[11px]">
-        <button
-          v-for="l in store.entries"
-          :key="`${l.timestamp}-${l.requestId}-${l.message.slice(0, 16)}`"
-          class="flex items-start gap-3 px-4 py-2 text-left transition-colors odd:bg-muted/30 hover:bg-muted/60"
-          @click="store.select(l)"
-        >
-          <span class="w-16 shrink-0 text-muted-foreground">{{ formatTime(l.timestamp) }}</span>
-          <span class="w-12 shrink-0 font-semibold" :class="levelClass(l)">{{ levelLabel(l) }}</span>
-          <span class="min-w-0 flex-1 break-all text-foreground/90">{{ l.message }}</span>
-        </button>
-        <div v-if="!store.loading && !store.entries.length" class="py-12 text-center text-xs text-muted-foreground">
-          暂无日志
-        </div>
-        <div v-if="store.loading" class="flex flex-col gap-1 py-2">
-          <Skeleton v-for="i in 8" :key="i" class="h-5 w-full" />
+      <div class="overflow-x-auto">
+        <Table>
+          <TableHeader>
+            <TableRow class="hover:bg-transparent">
+              <TableHead class="w-20 whitespace-nowrap text-xs">时间</TableHead>
+              <TableHead class="w-16 whitespace-nowrap text-xs">类型</TableHead>
+              <TableHead class="w-16 whitespace-nowrap text-xs">渠道</TableHead>
+              <TableHead class="max-w-40 text-xs">模型</TableHead>
+              <TableHead class="w-20 whitespace-nowrap text-right text-xs">提示Tokens</TableHead>
+              <TableHead class="w-20 whitespace-nowrap text-right text-xs">补全Tokens</TableHead>
+              <TableHead class="w-16 whitespace-nowrap text-right text-xs">倍率</TableHead>
+              <TableHead class="w-20 whitespace-nowrap text-right text-xs">缓存Tokens</TableHead>
+              <TableHead class="w-24 whitespace-nowrap text-right text-xs">额度</TableHead>
+              <TableHead class="w-16 whitespace-nowrap text-xs">用户</TableHead>
+              <TableHead class="max-w-56 text-xs">详情</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow
+              v-for="l in store.entries"
+              :key="`${l.timestamp}-${l.requestId}-${l.message.slice(0, 12)}`"
+              class="cursor-pointer"
+              @click="store.select(l)"
+            >
+              <TableCell class="whitespace-nowrap font-mono text-[11px] text-muted-foreground">
+                {{ formatTime(l.timestamp) }}
+              </TableCell>
+              <TableCell>
+                <span class="rounded-md px-1.5 py-0.5 text-[10px] font-medium" :class="typeBadge(l).class">
+                  {{ typeBadge(l).label }}
+                </span>
+              </TableCell>
+              <TableCell class="text-xs tabular-nums text-muted-foreground">
+                {{ consumeDetail(l).channelId != null ? `#${consumeDetail(l).channelId}` : '—' }}
+              </TableCell>
+              <TableCell class="max-w-40 truncate text-xs font-medium">
+                {{ consumeDetail(l).model ?? '—' }}
+              </TableCell>
+              <TableCell class="whitespace-nowrap text-right text-xs tabular-nums">
+                {{ consumeDetail(l).promptTokens != null ? formatNumber(consumeDetail(l).promptTokens as number) : '—' }}
+              </TableCell>
+              <TableCell class="whitespace-nowrap text-right text-xs tabular-nums">
+                {{ consumeDetail(l).completionTokens != null ? formatNumber(consumeDetail(l).completionTokens as number) : '—' }}
+              </TableCell>
+              <TableCell class="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                {{ consumeDetail(l).modelRatio != null ? `×${consumeDetail(l).modelRatio}` : '—' }}
+              </TableCell>
+              <TableCell class="whitespace-nowrap text-right text-xs tabular-nums text-muted-foreground">
+                {{ consumeDetail(l).cacheTokens != null ? formatNumber(consumeDetail(l).cacheTokens as number) : '—' }}
+              </TableCell>
+              <TableCell class="whitespace-nowrap text-right text-xs font-medium tabular-nums">
+                {{ consumeDetail(l).quota != null ? formatNumber(consumeDetail(l).quota as number) : '—' }}
+              </TableCell>
+              <TableCell class="text-xs tabular-nums text-muted-foreground">
+                {{ consumeDetail(l).userId != null ? `#${consumeDetail(l).userId}` : '—' }}
+              </TableCell>
+              <TableCell class="max-w-56 truncate text-[11px] text-muted-foreground">
+                {{ l.message }}
+              </TableCell>
+            </TableRow>
+            <TableRow v-if="!store.loading && !store.entries.length">
+              <TableCell colspan="11" class="py-12 text-center text-xs text-muted-foreground">暂无日志</TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+        <div v-if="store.loading" class="flex flex-col gap-1 border-t border-border py-2">
+          <Skeleton v-for="i in 8" :key="i" class="h-6 w-full" />
         </div>
       </div>
 

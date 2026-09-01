@@ -203,7 +203,7 @@ export interface LogFacetsResponse {
 
 // ─── 原始日志流 ───
 
-export type RawLogKind = 'all' | 'consume' | 'gin' | 'error' | 'success' | 'failure';
+export type RawLogKind = 'all' | 'consume' | 'gin' | 'error' | 'sys' | 'success' | 'failure';
 
 export interface RawLogEntry {
   timestamp: number;

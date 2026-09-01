@@ -88,26 +88,31 @@ export class LogWatcher implements Lifecycle {
 
   private startWatching(): void {
     const env = getEnv();
-    const globPattern = path.join(env.LOG_DIR, env.LOG_PATTERN);
+    const pattern = globToRegExp(env.LOG_PATTERN);
 
-    log.info({ pattern: globPattern }, 'Starting file watcher');
+    log.info({ dir: env.LOG_DIR, pattern: env.LOG_PATTERN }, 'Starting file watcher');
 
-    // usePolling: true is crucial for Docker mount volumes / shared filesystems
-    this.watcher = chokidarWatch(globPattern, {
+    // usePolling: true is crucial for Docker mount volumes / shared filesystems.
+    // Watch the directory and filter by pattern ourselves — chokidar's glob
+    // form is unreliable across fs variants.
+    this.watcher = chokidarWatch(env.LOG_DIR, {
       persistent: true,
       usePolling: true,
       interval: 1000,
       binaryInterval: 1000,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 100 },
       ignoreInitial: true,
+      depth: 0,
     });
 
     this.watcher.on('add', (filePath: string) => {
+      if (!pattern.test(path.basename(filePath))) return;
       log.debug({ file: filePath }, 'New log file detected');
       void this.readNewLines(filePath, 0).then((entries) => this.emitEntries(entries));
     });
 
     this.watcher.on('change', (filePath: string) => {
+      if (!pattern.test(path.basename(filePath))) return;
       const offset = this.fileOffsets.get(filePath) ?? 0;
       void this.readNewLines(filePath, offset).then((entries) => this.emitEntries(entries));
     });

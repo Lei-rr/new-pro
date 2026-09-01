@@ -11,7 +11,7 @@ const epochMs = z.string().regex(/^\d+$/).transform(Number);
 
 
 const streamQuery = z.object({
-  kind: z.enum(['all', 'consume', 'gin', 'error', 'success', 'failure']).optional(),
+  kind: z.enum(['all', 'consume', 'gin', 'error', 'sys', 'success', 'failure']).optional(),
   q: z.string().optional(),
   start: epochMs.optional(),
   end: epochMs.optional(),
@@ -28,13 +28,14 @@ function formatRawLog(e: ParsedLogEntry) {
   };
 
   if (isConsume(e)) {
+    const f = formatConsume(e);
     return {
       ...base,
       level: 'INFO' as const,
       kind: 'consume' as const,
       success: true,
       message: `消耗记录 userId=${e.userId} model=${e.params.model_name} tokens=${e.params.prompt_tokens}+${e.params.completion_tokens} quota=${e.params.quota}`,
-      detail: formatConsume(e),
+      detail: { ...f, modelRatio: f.modelRatio ?? e.params.other?.model_ratio ?? null },
     };
   }
   if (isGin(e)) {

@@ -15,6 +15,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
 
   const alertListeners = new Set<(a: Alert) => void>();
   const logListeners = new Set<(entries: RawLogEntry[]) => void>();
+  const summaryListeners = new Set<(s: OverviewSummary) => void>();
 
   function handle(msg: WsMessage): void {
     switch (msg.type) {
@@ -22,6 +23,7 @@ export const useRealtimeStore = defineStore('realtime', () => {
       case 'stats_update':
         summary.value = msg.data.summary;
         alerts.value = msg.data.alerts;
+        summaryListeners.forEach((fn) => fn(msg.data.summary));
         break;
       case 'alert':
         alerts.value = [...alerts.value.filter((a) => a.id !== msg.data.id), msg.data];
@@ -41,6 +43,11 @@ export const useRealtimeStore = defineStore('realtime', () => {
     return () => alertListeners.delete(fn);
   }
 
+  function onSummary(fn: (s: OverviewSummary) => void): () => void {
+    summaryListeners.add(fn);
+    return () => summaryListeners.delete(fn);
+  }
+
   function onLogs(fn: (entries: RawLogEntry[]) => void): () => void {
     logListeners.add(fn);
     return () => logListeners.delete(fn);
@@ -55,5 +62,5 @@ export const useRealtimeStore = defineStore('realtime', () => {
     client.disconnect();
   }
 
-  return { connected, summary, alerts, connect, disconnect, onAlert, onLogs };
+  return { connected, summary, alerts, connect, disconnect, onAlert, onSummary, onLogs };
 });

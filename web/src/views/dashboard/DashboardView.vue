@@ -18,6 +18,10 @@ const logs = useLogsStore();
 onMounted(() => {
   overview.load();
   realtime.onLogs((entries) => logs.appendLive(entries));
+  // 实时刷新 KPI：后端每 3s 推送一次 summary，直接更新（无额外请求）
+  realtime.onSummary((s) => {
+    if (overview.summary) overview.summary = s;
+  });
 });
 
 watch(() => app.rangeHours, () => overview.load());

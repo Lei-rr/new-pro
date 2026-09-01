@@ -64,8 +64,8 @@ export interface LogSearchFilter {
 }
 
 export interface RawLogFilter {
-  /** 'all' | GIN/consume level, or 'success' | 'error' */
-  kind?: 'all' | 'consume' | 'gin' | 'error' | 'success' | 'failure';
+  /** 'all' | 'consume' | 'gin' | 'error' | 'sys' | 'success' | 'failure' */
+  kind?: 'all' | 'consume' | 'gin' | 'error' | 'sys' | 'success' | 'failure';
   q?: string;
   start?: number;
   end?: number;

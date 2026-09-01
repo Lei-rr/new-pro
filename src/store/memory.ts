@@ -515,6 +515,8 @@ export class MemoryStore implements IStore, Lifecycle {
           continue;
         } else if (filter.kind === 'error' && !isError(e)) {
           continue;
+        } else if (filter.kind === 'sys') {
+          if (e.level !== 'SYS' && !(e.level === 'INFO' && !isConsume(e) && !isGin(e) && !isError(e))) continue;
         }
       }
 
