@@ -28,7 +28,7 @@ export interface HighRiskIpItem {
   modelsUsed: string[]
   tokensUsed?: string[]
   lastSeen: string
-  riskType: 'brushing' | 'high_failure' | 'burst' | 'quota_vampire' | 'massive_volume'
+  riskType: 'relay_hijack' | 'brushing' | 'massive_volume'
   riskReason: string
   rpmRate?: number
   burst5m?: number
@@ -61,15 +61,6 @@ export interface RiskReport {
     errorRate: number
     avgLatency: number
     lastErrorMessage: string
-  }>
-  costSurgeIps: Array<{
-    ip: string
-    quota: number
-    costUsd: number
-    requestCount: number
-    tokens: string[]
-    models: string[]
-    abnormalFactor: string
   }>
 }
 
@@ -129,12 +120,12 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     FROM logs
     WHERE created_at >= ${fiveMinAgo}
     GROUP BY ip_addr
-    HAVING count(*) >= 25
+    HAVING count(*) >= 20
     ORDER BY burst_5m DESC
     LIMIT 25
   `
 
-  // 3. 扫描严重故障或完全瘫痪的渠道（面向公益站：放宽偶发错误阈值，只抓真正大面积瘫痪）
+  // 3. 扫描严重故障或完全瘫痪的主力渠道（面向公益站：放宽偶发错误阈值，只抓真正大面积瘫痪）
   const channelScanSql = `
     SELECT 
       l.channel_id,
@@ -148,28 +139,12 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     LEFT JOIN channels c ON l.channel_id = c.id
     WHERE l.channel_id IS NOT NULL ${andTimeCondition}
     GROUP BY l.channel_id, c.name, c.status
-    HAVING count(*) >= 25
+    HAVING count(*) >= 30
     ORDER BY failed_req DESC
     LIMIT 20
   `
 
-  // 4. 公益站专属：扫描单 IP 巨额算力鲸吞 (单 IP 消耗超过 $50 USD，防止把公共 Key 拿去商业爬虫私用)
-  const ipCostSql = `
-    SELECT 
-      COALESCE(NULLIF(ip, ''), '未知') as ip_addr,
-      count(*) as req_count,
-      COALESCE(sum(quota) FILTER (WHERE type = 2), 0) as total_quota,
-      array_agg(DISTINCT model_name) FILTER (WHERE model_name IS NOT NULL AND model_name != '') as models,
-      array_agg(DISTINCT token_name) FILTER (WHERE token_name IS NOT NULL AND token_name != '') as tokens
-    FROM logs
-    WHERE type = 2 ${andTimeCondition}
-    GROUP BY ip_addr
-    HAVING sum(quota) >= 25000000 -- 超过 $50 USD (5000万 Quota)
-    ORDER BY total_quota DESC
-    LIMIT 15
-  `
-
-  // 5. 扫描全局极端严重超时 (>45秒，排除正常的思考模型长耗时)
+  // 4. 扫描全局极端严重超时 (>45秒，排除常规思考模型长耗时)
   const failureSpikeSql = `
     SELECT 
       count(*) as total_req,
@@ -179,11 +154,10 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     ${timeCondition}
   `
 
-  const [ipRes, burstRes, channelRes, ipCostRes, spikeRes] = await Promise.all([
+  const [ipRes, burstRes, channelRes, spikeRes] = await Promise.all([
     db.query(ipScanSql),
     db.query(burstScanSql),
     db.query(channelScanSql),
-    db.query(ipCostSql),
     db.query(failureSpikeSql),
   ])
 
@@ -231,7 +205,7 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     }
   }
 
-  // 分析高危与恶意刷量 IP
+  // 分析高危与恶意刷量 IP（聚焦中转站接走、极端天量请求、恶意死循环三大核心）
   const highRiskIps: HighRiskIpItem[] = []
   const recordedIps = new Set<string>()
 
@@ -254,19 +228,19 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     const models = (b.burst_models || []).slice(0, 5)
     const tokens = (b.burst_tokens || []).slice(0, 5)
 
-    // 公益站定制规则 A: 短时恶霸并发挤占 (1分钟 >= 75次，或5分钟 >= 250次，相当于单个用户独占了全站很大比例通道)
-    // 公益站定制规则 B: 短时恶意死循环撞库 (5分钟 >= 30次且失败率 >= 75%，或者1分钟 >= 20次且失败率 >= 80%)
-    const isExtremeBurst = burst1m >= 75 || burst5m >= 250
-    const isMaliciousBrushing = (burst5m >= 30 && failRate5m >= 75) || (burst1m >= 20 && failRate5m >= 80)
+    // 核心规则 1: 被别家中转站接走 / 持续高频并发 (1分钟 >= 60次，或5分钟 >= 200次)
+    const isRelayHijack = burst1m >= 60 || burst5m >= 200
+    // 核心规则 2: 短时恶意死循环撞库 (5分钟 >= 30次且失败率 >= 70%，或1分钟 >= 20次且失败率 >= 75%)
+    const isBrushingBurst = (burst5m >= 30 && failRate5m >= 70) || (burst1m >= 20 && failRate5m >= 75)
 
-    if (isExtremeBurst || isMaliciousBrushing) {
+    if (isRelayHijack || isBrushingBurst) {
       recordedIps.add(ip)
-      const riskType = isMaliciousBrushing ? 'brushing' : 'burst'
-      const severity: RiskSeverity = (burst1m >= 100 || failRate5m >= 85) ? 'critical' : 'high'
+      const riskType: HighRiskIpItem['riskType'] = isBrushingBurst ? 'brushing' : 'relay_hijack'
+      const severity: RiskSeverity = (burst1m >= 90 || failRate5m >= 85) ? 'critical' : 'high'
 
-      const reason = isMaliciousBrushing
-        ? `【恶意死循环刷接口】5分钟内持续报错请求 ${burst5m} 次 (失败率 ${failRate5m.toFixed(1)}%)，疑似脚本故障死循环或自动化撞库！`
-        : `【短时恶霸并发挤占】1分钟暴增 ${burst1m} 次请求 (5分钟 ${burst5m} 次)，单个客户端占用过高并发，影响其他公益用户！`
+      const reason = isBrushingBurst
+        ? `【恶意死循环刷接口】5分钟内持续报错请求 ${burst5m} 次 (失败率高达 ${failRate5m.toFixed(1)}%)，客户端持续报错却不停止重试！`
+        : `【疑似被中转站接走 / 持续高频】每分钟请求高达 ${burst1m} 次 (5分钟累计 ${burst5m} 次)，疑似被其他中转站套娃对接或自动化爬虫持续占用！`
 
       highRiskIps.push({
         ip,
@@ -287,23 +261,23 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
 
       alerts.push({
         id: `alert-burst-ip-${ip.replace(/[.:]/g, '-')}`,
-        title: isMaliciousBrushing ? `检测到恶意死循环刷量 IP: ${ip}` : `检测到恶霸高并发挤占 IP: ${ip}`,
+        title: isBrushingBurst ? `检测到恶意死循环刷量 IP: ${ip}` : `检测到疑似中转站套娃 IP: ${ip}`,
         description: `${reason} 涉及模型: ${models.join(', ') || '通用'}，使用令牌: ${tokens.join(', ') || '默认'}。`,
         severity,
         category: 'ip_abuse',
         target: ip,
         metricValue: `1分钟 ${burst1m} 次 / 5分钟 ${burst5m} 次`,
-        threshold: '公益站单IP安全线: 1分钟 < 75 次',
-        suggestion: isMaliciousBrushing
+        threshold: '安全并发线: 1分钟 < 60 次',
+        suggestion: isBrushingBurst
           ? '建议立即在防火墙、Nginx 或 NewAPI 客户端黑名单中彻底封禁该 IP。'
-          : '该客户端占用频率过高，建议配置单 IP 并发上限或予以限流，保障公平使用。',
+          : '该 IP 呈现典型的中转站转发或多线程持续抓取特征，建议予以限频或单 IP 并发限制。',
         details: { ip, burst5m, burst1m, failed5m, failRate5m },
         createdAt: new Date().toISOString(),
       })
     }
   }
 
-  // 2. 分析全周期宏观恶意高频与长期死循环 IP
+  // 2. 分析全周期宏观数据（天量调用、持续恶意刷接口）
   for (const row of ipRes.rows) {
     const ip = String(row.ip_addr)
     if (isInternalIp(ip)) continue
@@ -321,20 +295,20 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     let isRisky = false
     let riskReason = ''
     let riskType: HighRiskIpItem['riskType'] = 'massive_volume'
-    let severity: RiskSeverity = 'medium'
+    let severity: RiskSeverity = 'high'
 
-    // 公益站定制规则 C: 持续明显死循环/恶意试探 (累计 >= 300 次且失败率 >= 80%)
-    // 公益站定制规则 D: 持续极度占用全站吞吐 (单 IP 累计超过 30,000 次)
-    if (total >= 300 && failureRate >= 80) {
+    // 核心规则 3: 一直恶意死循环刷接口 (累计 >= 200 次且失败率 >= 70%，或累计失败 >= 150 次且失败率 >= 60%)
+    // 核心规则 4: 单 IP 极端天量请求 (累计 >= 5000 次，干了几千上万次请求)
+    if ((total >= 200 && failureRate >= 70) || (failed >= 150 && failureRate >= 60)) {
       isRisky = true
       riskType = 'brushing'
-      severity = failureRate >= 90 ? 'critical' : 'high'
-      riskReason = `【持续恶意死循环】累计调用 ${total.toLocaleString()} 次，失败率高达 ${failureRate}%，全是无效无意义报错！`
-    } else if (total > 30000) {
+      severity = failureRate >= 85 ? 'critical' : 'high'
+      riskReason = `【持续恶意刷接口】累计请求高达 ${total.toLocaleString()} 次，失败率高达 ${failureRate}% (失败 ${failed} 次)，无视报错持续死循环刷接口！`
+    } else if (total >= 5000) {
       isRisky = true
       riskType = 'massive_volume'
-      severity = total > 50000 ? 'high' : 'medium'
-      riskReason = `【单IP持续大吞吐】单 IP 累计调用高达 ${total.toLocaleString()} 次，持续占用大量上游转发配额`
+      severity = total >= 10000 ? 'critical' : 'high'
+      riskReason = `【单IP极端天量请求】单 IP 在统计周期内累计发起 ${total.toLocaleString()} 次请求，吞吐量过大占用大量调度资源！`
     }
 
     if (isRisky) {
@@ -367,85 +341,20 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
 
         alerts.push({
           id: `alert-ip-${ip.replace(/[.:]/g, '-')}`,
-          title: riskType === 'brushing' ? `发现持续恶意刷接口 IP: ${ip}` : `发现超大调用量 IP: ${ip}`,
-          description: `${riskReason}。累计请求 ${total} 次，消耗配额 ${quota}，主要调用模型: ${models.join(', ') || '默认'}。`,
+          title: riskType === 'brushing' ? `发现持续恶意刷接口 IP: ${ip}` : `发现单 IP 天量调用: ${ip}`,
+          description: `${riskReason} 涉及模型: ${models.join(', ') || '默认'}，使用令牌: ${tokens.join(', ') || '默认'}。`,
           severity,
           category: 'ip_abuse',
           target: ip,
           metricValue: `${total} 请求 / ${failureRate}% 失败`,
-          threshold: riskType === 'brushing' ? '失败率警戒线 < 50%' : '安全请求线 < 30000 次',
+          threshold: riskType === 'brushing' ? '失败率警戒线 < 50%' : '单IP请求上限 < 5,000 次',
           suggestion: riskType === 'brushing'
-            ? '该 IP 表现出明显的攻击性自动化探测或恶意占道特征，建议立即拉黑屏蔽。'
-            : '建议在防火墙、Nginx 反向代理层或 NewAPI 客户端黑名单中限制其访问速率。',
+            ? '该 IP 表现出明显的破坏性死循环探测或恶意刷量特征，建议立即在防火墙彻底拉黑。'
+            : '单 IP 请求次数过多，建议配置单 IP 每日请求次数上限或予以限速。',
           details: { ip, total, failed, failureRate, quota, models, tokens },
           createdAt: new Date().toISOString(),
         })
       }
-    }
-  }
-
-  // 3. 公益站核心特色：分析单 IP 巨额算力鲸吞 (Quota Vampire)
-  const costSurgeIps: RiskReport['costSurgeIps'] = []
-  for (const row of ipCostRes.rows) {
-    const ip = String(row.ip_addr)
-    if (isInternalIp(ip)) continue
-
-    const reqCount = Number(row.req_count || 0)
-    const totalQuota = Number(row.total_quota || 0)
-    const costUsd = Number((totalQuota / 500000).toFixed(2))
-    const models = (row.models || []).slice(0, 5)
-    const tokens = (row.tokens || []).slice(0, 5)
-
-    if (costUsd >= 50) {
-      costSurgeIps.push({
-        ip,
-        quota: totalQuota,
-        costUsd,
-        requestCount: reqCount,
-        tokens,
-        models,
-        abnormalFactor: `单 IP 消耗高达 $${costUsd} (${totalQuota.toLocaleString()} Quota)`,
-      })
-
-      const severity: RiskSeverity = costUsd >= 200 ? 'critical' : 'high'
-      recordedIps.add(ip)
-
-      const existing = highRiskIps.find((h) => h.ip === ip)
-      if (existing) {
-        existing.riskType = 'quota_vampire'
-        existing.costUsd = costUsd
-        existing.riskReason = `【单IP算力鲸吞】单 IP 累计消耗超额算力 $${costUsd} USD (${totalQuota.toLocaleString()} Quota)！`
-        existing.severity = severity
-      } else {
-        highRiskIps.push({
-          ip,
-          requestCount: reqCount,
-          failedCount: 0,
-          failureRate: 0,
-          quotaUsed: totalQuota,
-          costUsd,
-          modelsUsed: models,
-          tokensUsed: tokens,
-          lastSeen: '当前周期内',
-          riskType: 'quota_vampire',
-          riskReason: `【单IP算力鲸吞】单 IP 累计消耗超额算力 $${costUsd} USD (${totalQuota.toLocaleString()} Quota)！`,
-          severity,
-        })
-      }
-
-      alerts.push({
-        id: `alert-ip-vampire-${ip.replace(/[.:]/g, '-')}`,
-        title: `检测到单 IP 巨额算力鲸吞: ${ip}`,
-        description: `该 IP 在周期内仅用公共 API Key 就消耗了 $${costUsd} USD (${totalQuota.toLocaleString()} Quota)，发起调用 ${reqCount} 次，主要使用模型: ${models.join(', ') || '默认'}。疑似拿公共免费资源跑商业私活或大批量爬取！`,
-        severity,
-        category: 'cost_anomaly',
-        target: ip,
-        metricValue: `$${costUsd} USD`,
-        threshold: '公益站单IP安全线 < $50.00',
-        suggestion: '建议在 Nginx、防火墙或 NewAPI 客户端黑名单中限制其访问频率，或配置单 IP 每日最大 Quota 上限，防止公共免费额度被个人薅干。',
-        details: { ip, costUsd, totalQuota, reqCount, models, tokens },
-        createdAt: new Date().toISOString(),
-      })
     }
   }
 
@@ -508,8 +417,12 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
     alerts,
     highRiskIps,
     failingChannels,
-    costSurgeIps,
   }
+
+  // 写入缓存 5 秒
+  memoryCache.set(cacheKey, result, 5000)
+
+  return result
 
   // 写入缓存 5 秒
   memoryCache.set(cacheKey, result, 5000)

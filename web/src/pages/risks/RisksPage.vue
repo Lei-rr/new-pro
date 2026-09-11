@@ -316,35 +316,28 @@ onUnmounted(() => {
                     v-if="ip.riskType === 'brushing'"
                     class="text-[10px] px-1.5 py-0 h-4 bg-destructive text-destructive-foreground border-transparent"
                   >
-                    恶意刷量
+                    恶意刷接口
                   </Badge>
                   <Badge
-                    v-else-if="ip.riskType === 'quota_vampire'"
+                    v-else-if="ip.riskType === 'relay_hijack'"
+                    class="text-[10px] px-1.5 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10"
+                    variant="outline"
+                  >
+                    中转站接走
+                  </Badge>
+                  <Badge
+                    v-else-if="ip.riskType === 'massive_volume'"
                     class="text-[10px] px-1.5 py-0 h-4 border-purple-500/40 text-purple-600 dark:text-purple-400 bg-purple-500/10"
                     variant="outline"
                   >
-                    算力鲸吞
-                  </Badge>
-                  <Badge
-                    v-else-if="ip.riskType === 'burst'"
-                    class="text-[10px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10"
-                    variant="outline"
-                  >
-                    恶霸挤占
-                  </Badge>
-                  <Badge
-                    v-else-if="ip.riskType === 'high_failure'"
-                    variant="destructive"
-                    class="text-[10px] px-1.5 py-0 h-4"
-                  >
-                    高频报错
+                    天量请求
                   </Badge>
                   <Badge
                     v-else
                     variant="secondary"
                     class="text-[10px] px-1.5 py-0 h-4"
                   >
-                    超大并发
+                    高频并发
                   </Badge>
                 </TableCell>
                 <TableCell class="text-right font-mono text-xs">
