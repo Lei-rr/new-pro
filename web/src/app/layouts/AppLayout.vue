@@ -310,23 +310,25 @@ onUnmounted(() => {
       </RouterView>
     </main>
 
-    <!-- 页脚状态条 -->
-    <footer class="mt-auto border-t border-border/40 py-4 text-xs text-muted-foreground bg-muted/10">
-      <div class="mx-auto flex w-full max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
+    <!-- 页脚状态条 (优化移动端自适应排版与紧凑展示) -->
+    <footer class="mt-auto border-t border-border/40 py-3.5 sm:py-4 text-xs text-muted-foreground bg-muted/10">
+      <div class="mx-auto flex w-full max-w-7xl flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4 px-4 sm:px-6 lg:px-8">
         <div class="flex items-center gap-2">
-          <span class="font-semibold text-foreground">New-Pro</span>
-          <Badge variant="outline" class="h-4.5 px-1.5 text-[10px]">v1.0.0</Badge>
+          <span class="font-semibold text-foreground tracking-tight">New-Pro</span>
+          <Badge variant="outline" class="h-4.5 px-1.5 text-[10px] font-mono">v1.0.0</Badge>
+          <span class="hidden sm:inline text-border">|</span>
+          <span class="text-[11px] text-muted-foreground/80">高性能实时监控</span>
         </div>
-        <div class="flex items-center gap-3">
-          <span class="flex items-center gap-1.5 text-[11px]">
+        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px]">
+          <span class="flex items-center gap-1.5">
             <span
-              class="size-2 rounded-full transition-colors"
+              class="size-1.5 rounded-full transition-colors shrink-0"
               :class="pulse.wsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'"
             />
-            <span class="text-muted-foreground">{{ pulse.wsConnected ? 'WS 实时流已连接' : 'WS 正在连接...' }}</span>
+            <span class="text-muted-foreground">{{ pulse.wsConnected ? 'WebSocket 已直连' : 'WS 正在连接...' }}</span>
           </span>
-          <span class="flex items-center gap-1.5 text-[11px]">
-            <Database class="size-3.5 text-emerald-500" />
+          <span class="flex items-center gap-1.5">
+            <Database class="size-3.5 text-emerald-500 shrink-0" />
             <span class="text-muted-foreground">PostgreSQL:</span>
             <span class="text-emerald-600 dark:text-emerald-400 font-medium">正常通信</span>
           </span>
