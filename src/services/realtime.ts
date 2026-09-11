@@ -27,6 +27,8 @@ export interface RealtimePulse {
     totalTokens: number
     useTime: number
     status: 'success' | 'failed' | 'other'
+    errorCode?: string
+    errorDetail?: string
   }>
 }
 
@@ -64,10 +66,11 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
       COALESCE(NULLIF(l.username, ''), '系统') as username,
       COALESCE(NULLIF(l.ip, ''), '-') as ip,
       l.quota,
-      l.prompt_tokens,
-      l.completion_tokens,
-      (l.prompt_tokens + l.completion_tokens) as total_tokens,
-      l.use_time
+      COALESCE(l.prompt_tokens, 0) as prompt_tokens,
+      COALESCE(l.completion_tokens, 0) as completion_tokens,
+      COALESCE(l.prompt_tokens + l.completion_tokens, 0) as total_tokens,
+      l.use_time,
+      l.content
     FROM logs l
     LEFT JOIN channels c ON l.channel_id = c.id
     ORDER BY l.id DESC
@@ -109,6 +112,27 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
     successRate1m,
     recentLogs: logsRes.rows.map((r: any) => {
       const logType = Number(r.type)
+      const content = String(r.content || '')
+      let errorCode = ''
+      if (logType === 5) {
+        const match = content.match(/status_code=(\d{3})/)
+        if (match) {
+          errorCode = match[1]
+        } else if (content.includes('429')) {
+          errorCode = '429'
+        } else if (content.includes('500')) {
+          errorCode = '500'
+        } else if (content.includes('502')) {
+          errorCode = '502'
+        } else if (content.includes('503')) {
+          errorCode = '503'
+        } else if (content.includes('400')) {
+          errorCode = '400'
+        } else {
+          errorCode = 'ERR'
+        }
+      }
+
       return {
         id: Number(r.id),
         createdAt: new Date(Number(r.created_at) * 1000).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }),
@@ -123,6 +147,8 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
         totalTokens: Number(r.total_tokens || 0),
         useTime: Number(r.use_time || 0),
         status: logType === 2 ? 'success' : (logType === 5 ? 'failed' : 'other'),
+        errorCode: errorCode || undefined,
+        errorDetail: content || undefined,
       }
     }),
   }

@@ -510,13 +510,20 @@ onUnmounted(() => {
           <div>
             <div class="text-[11px] text-muted-foreground font-medium flex items-center gap-1.5">
               <Clock class="size-3.5 text-sky-500" />
-              实时上游延迟
+              <span>实时上游延迟</span>
+              <Badge
+                variant="outline"
+                class="text-[9px] px-1 py-0 h-3.5 border-transparent font-normal"
+                :class="(pulse?.avgLatency1m ?? 0) <= 800 ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' : ((pulse?.avgLatency1m ?? 0) <= 2500 ? 'bg-sky-500/10 text-sky-600 dark:text-sky-400' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400')"
+              >
+                {{ (pulse?.avgLatency1m ?? 0) <= 800 ? '极速' : ((pulse?.avgLatency1m ?? 0) <= 2500 ? '良好' : '较慢') }}
+              </Badge>
             </div>
             <div class="text-2xl font-bold mt-1 font-mono text-sky-600 dark:text-sky-400">
               <NumberRolling :value="pulse?.avgLatency1m ?? 0" suffix="ms" />
             </div>
             <div class="text-[10px] text-muted-foreground mt-0.5">
-              周期均延: <span class="font-medium text-foreground">{{ overview?.summary?.avgLatencyMs ?? 0 }}ms</span>
+              周期均延: <span class="font-medium text-foreground"><NumberRolling :value="overview?.summary?.avgLatencyMs ?? 0" suffix="ms" /></span>
             </div>
           </div>
           <div class="size-9 rounded-lg bg-sky-500/10 text-sky-500 flex items-center justify-center">
@@ -537,7 +544,7 @@ onUnmounted(() => {
               <NumberRolling :value="pulse?.successRate1m ?? 100" :precision="2" suffix="%" />
             </div>
             <div class="text-[10px] text-muted-foreground mt-0.5">
-              周期总成功率: <span class="font-medium text-foreground">{{ Number(overview?.summary?.successRate ?? 100).toFixed(2) }}%</span>
+              周期总成功率: <span class="font-medium text-foreground"><NumberRolling :value="Number(overview?.summary?.successRate ?? 100)" :precision="2" suffix="%" /></span>
             </div>
           </div>
           <div class="size-9 rounded-lg bg-primary/5 text-primary flex items-center justify-center">
@@ -567,7 +574,12 @@ onUnmounted(() => {
               失败 <NumberRolling :value="overview?.summary?.failedRequests ?? 0" only-up />
             </span>
           </div>
-          <Progress class="h-1.5 mt-2" :model-value="overview?.summary?.successRate ?? 100" />
+          <div class="flex items-center justify-between gap-2 mt-2">
+            <Progress class="h-1.5 flex-1" :model-value="overview?.summary?.successRate ?? 100" />
+            <span class="text-[10px] text-muted-foreground font-mono shrink-0">
+              <NumberRolling :value="pulse?.qps ?? 0" :precision="1" /> req/s
+            </span>
+          </div>
         </CardContent>
       </Card>
 
@@ -578,15 +590,24 @@ onUnmounted(() => {
             <NumberRolling :value="overview?.summary?.totalCostUsd ?? 0" prefix="$" :precision="2" only-up />
           </CardTitle>
         </CardHeader>
-        <CardContent class="text-xs text-muted-foreground">
+        <CardContent class="text-xs text-muted-foreground space-y-1">
           <div class="flex items-center justify-between">
             <span>折合配额 (Quota):</span>
             <span class="font-mono font-medium text-foreground">
               <NumberRolling :value="overview?.summary?.totalQuota ?? 0" only-up />
             </span>
           </div>
-          <div class="text-[11px] text-muted-foreground mt-2">
-            换算规则: 500,000 Quota = $1.00 USD
+          <div class="flex items-center justify-between">
+            <span>千次调用均价:</span>
+            <span class="font-mono font-medium text-emerald-600 dark:text-emerald-400">
+              <NumberRolling
+                :value="(overview?.summary?.totalRequests ?? 0) > 0 ? Number(((overview?.summary?.totalCostUsd ?? 0) / (overview?.summary?.totalRequests) * 1000).toFixed(4)) : 0"
+                prefix="$"
+                :precision="4"
+                suffix="/ 1k"
+                only-up
+              />
+            </span>
           </div>
         </CardContent>
       </Card>
@@ -769,8 +790,9 @@ onUnmounted(() => {
                   :variant="log.status === 'success' ? 'default' : 'destructive'"
                   class="text-[10px] px-1.5 py-0 h-4"
                   :class="log.status === 'success' && 'bg-emerald-500 hover:bg-emerald-600 text-white border-transparent'"
+                  :title="log.status === 'failed' ? (log.errorDetail || log.errorCode || '请求异常') : '请求成功'"
                 >
-                  {{ log.status === 'success' ? '200 OK' : '失败' }}
+                  {{ log.status === 'success' ? '200 OK' : (log.errorCode ? `${log.errorCode} 失败` : '失败') }}
                 </Badge>
               </TableCell>
               <TableCell class="text-right pr-4">
