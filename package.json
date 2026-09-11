@@ -1,0 +1,43 @@
+{
+  "name": "new-pro",
+  "version": "1.0.0",
+  "description": "NewAPI 高性能多维实时监控与风险分析系统",
+  "type": "module",
+  "workspaces": [
+    "web"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "npm run dev:server",
+    "dev:server": "tsx watch src/server.ts --port 3033",
+    "dev:web": "npm --workspace new-pro-web run dev",
+    "start": "node dist/server.js",
+    "build": "npm run build:server && npm run build:web",
+    "build:server": "rm -rf dist && esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --packages=external --outfile=dist/server.js",
+    "build:web": "npm --workspace new-pro-web run build"
+  },
+  "dependencies": {
+    "@fastify/compress": "^9.1.0",
+    "@fastify/cookie": "^11.1.0",
+    "@fastify/cors": "^10.0.2",
+    "@fastify/helmet": "^13.1.0",
+    "@fastify/rate-limit": "^11.2.0",
+    "@fastify/static": "^10.1.2",
+    "@fastify/type-provider-typebox": "^6.1.0",
+    "@fastify/websocket": "^11.3.0",
+    "dotenv": "^16.4.7",
+    "fastify": "^5.2.1",
+    "fastify-plugin": "^5.1.0",
+    "pg": "^8.13.3",
+    "typebox": "^1.3.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.9",
+    "@types/pg": "^8.11.11",
+    "esbuild": "^0.25.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
