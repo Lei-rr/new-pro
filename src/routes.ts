@@ -63,6 +63,8 @@ export async function registerApiRoutes(fastify: FastifyInstance) {
         username: authenticated ? config.adminUsername : null,
         dbConnected: dbOk,
         version: '1.0.0',
+        pulseIntervalSec: config.pulseIntervalSec,
+        calibrationIntervalSec: config.calibrationIntervalSec,
       },
     }
   })

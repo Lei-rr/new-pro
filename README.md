@@ -95,6 +95,8 @@ docker compose up -d
 | `PORT` | 否 | `3033` | 后端服务监听端口 |
 | `HOST` | 否 | `0.0.0.0` | 后端服务监听地址 |
 | `LOG_LEVEL` | 否 | `info` | 日志输出级别 (`debug`, `info`, `warn`, `error`) |
+| `PULSE_INTERVAL_SEC` | 否 | `5` | WebSocket 实时心跳推流间隔 (秒) |
+| `CALIBRATION_INTERVAL_SEC` | 否 | `60` | 图表聚合与宏观指标全量静默校准间隔 (秒) |
 
 ---
 

@@ -7,6 +7,8 @@ export interface SessionInfo {
   username: string | null
   dbConnected: boolean
   version: string
+  pulseIntervalSec?: number
+  calibrationIntervalSec?: number
 }
 
 export const useSessionStore = defineStore('session', () => {
@@ -14,6 +16,8 @@ export const useSessionStore = defineStore('session', () => {
   const username = ref<string | null>(null)
   const dbConnected = ref(false)
   const version = ref('1.0.0')
+  const pulseIntervalSec = ref(5)
+  const calibrationIntervalSec = ref(60)
   const loaded = ref(false)
 
   async function load() {
@@ -23,6 +27,8 @@ export const useSessionStore = defineStore('session', () => {
       username.value = res.username
       dbConnected.value = res.dbConnected
       version.value = res.version
+      if (res.pulseIntervalSec) pulseIntervalSec.value = res.pulseIntervalSec
+      if (res.calibrationIntervalSec) calibrationIntervalSec.value = res.calibrationIntervalSec
       loaded.value = true
       return res
     } catch (err) {
@@ -65,6 +71,8 @@ export const useSessionStore = defineStore('session', () => {
     username,
     dbConnected,
     version,
+    pulseIntervalSec,
+    calibrationIntervalSec,
     loaded,
     load,
     login,

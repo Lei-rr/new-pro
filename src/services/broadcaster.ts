@@ -1,5 +1,6 @@
 import type { WebSocket } from 'ws'
 import { getRealtimePulse, type RealtimePulse } from './realtime.js'
+import { loadConfig } from '../config.js'
 
 /**
  * 单例实时广播引擎 (Singleton Pulse Broadcaster)
@@ -46,9 +47,12 @@ class RealtimeBroadcaster {
     // 立即执行一次获取最新数据
     this.tick()
 
+    const config = loadConfig()
+    const intervalMs = config.pulseIntervalSec * 1000
+
     this.timer = setInterval(() => {
       this.tick()
-    }, 2000)
+    }, intervalMs)
   }
 
   private stopLoop() {
