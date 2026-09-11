@@ -647,9 +647,11 @@ onUnmounted(() => {
         </CardHeader>
         <CardContent class="text-xs text-muted-foreground space-y-1">
           <div class="flex items-center justify-between">
-            <span>5分钟活跃 IP:</span>
+            <span>实时活跃 (5m / 30m):</span>
             <span class="font-medium text-foreground">
-              <NumberRolling :value="pulse?.activeIps5m ?? 0" suffix="个 IP" />
+              <NumberRolling :value="pulse?.activeIps5m ?? 0" />
+              <span class="text-muted-foreground/60 mx-1">/</span>
+              <NumberRolling :value="pulse?.activeIps30m ?? 0" suffix="IP" />
             </span>
           </div>
           <div class="flex items-center justify-between">

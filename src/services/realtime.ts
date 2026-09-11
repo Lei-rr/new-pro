@@ -11,6 +11,7 @@ export interface RealtimePulse {
   last5mRequests: number
   activeIps1m: number
   activeIps5m: number
+  activeIps30m: number
   activeUsers1m: number
   avgLatency1m: number
   successRate1m: number
@@ -39,8 +40,9 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
   const oneMinAgo = now - 60
   const tenSecAgo = now - 10
   const fiveMinAgo = now - 300
+  const thirtyMinAgo = now - 1800
 
-  // 1. 过去 1 分钟 / 10 秒吞吐量
+  // 1. 过去 1 分钟 / 10 秒吞吐量与活跃 IP 统计 (5m / 30m)
   const throughputSql = `
     SELECT 
       count(*) FILTER (WHERE created_at >= ${tenSecAgo}) as req_10s,
@@ -52,9 +54,10 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
       COALESCE(round(avg(use_time) FILTER (WHERE created_at >= ${oneMinAgo} AND use_time > 0)), 0) as avg_latency_1m,
       count(DISTINCT ip) FILTER (WHERE created_at >= ${oneMinAgo}) as ips_1m,
       count(DISTINCT ip) FILTER (WHERE created_at >= ${fiveMinAgo}) as ips_5m,
+      count(DISTINCT ip) FILTER (WHERE created_at >= ${thirtyMinAgo}) as ips_30m,
       count(DISTINCT username) FILTER (WHERE created_at >= ${oneMinAgo}) as users_1m
     FROM logs
-    WHERE created_at >= ${fiveMinAgo}
+    WHERE created_at >= ${thirtyMinAgo}
   `
 
   // 2. 最近 15 条实时流日志
@@ -93,6 +96,7 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
   const avgLatency1m = Number(tp.avg_latency_1m || 0)
   const ips1m = Number(tp.ips_1m || 0)
   const ips5m = Number(tp.ips_5m || 0)
+  const ips30m = Number(tp.ips_30m || 0)
   const users1m = Number(tp.users_1m || 0)
 
   const qps = Number((req10s / 10).toFixed(1))
@@ -111,6 +115,7 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
     last5mRequests: req5m,
     activeIps1m: ips1m,
     activeIps5m: ips5m,
+    activeIps30m: ips30m,
     activeUsers1m: users1m,
     avgLatency1m,
     successRate1m,
