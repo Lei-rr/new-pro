@@ -10,6 +10,7 @@ export interface RealtimePulse {
   last1mRequests: number
   last5mRequests: number
   activeIps1m: number
+  activeIps5m: number
   activeUsers1m: number
   avgLatency1m: number
   successRate1m: number
@@ -50,6 +51,7 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
       COALESCE(sum(prompt_tokens + completion_tokens) FILTER (WHERE created_at >= ${oneMinAgo} AND type = 2), 0) as tokens_1m,
       COALESCE(round(avg(use_time) FILTER (WHERE created_at >= ${oneMinAgo} AND use_time > 0)), 0) as avg_latency_1m,
       count(DISTINCT ip) FILTER (WHERE created_at >= ${oneMinAgo}) as ips_1m,
+      count(DISTINCT ip) FILTER (WHERE created_at >= ${fiveMinAgo}) as ips_5m,
       count(DISTINCT username) FILTER (WHERE created_at >= ${oneMinAgo}) as users_1m
     FROM logs
     WHERE created_at >= ${fiveMinAgo}
@@ -90,6 +92,7 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
   const tokens1m = Number(tp.tokens_1m || 0)
   const avgLatency1m = Number(tp.avg_latency_1m || 0)
   const ips1m = Number(tp.ips_1m || 0)
+  const ips5m = Number(tp.ips_5m || 0)
   const users1m = Number(tp.users_1m || 0)
 
   const qps = Number((req10s / 10).toFixed(1))
@@ -107,6 +110,7 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
     last1mRequests: req1m,
     last5mRequests: req5m,
     activeIps1m: ips1m,
+    activeIps5m: ips5m,
     activeUsers1m: users1m,
     avgLatency1m,
     successRate1m,

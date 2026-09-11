@@ -19,7 +19,7 @@ export function loadConfig(): AppConfig {
     adminUsername: process.env.ADMIN_USER || 'admin',
     adminPasswordHash: process.env.ADMIN_PASS || 'admin123',
     logLevel: process.env.LOG_LEVEL || 'info',
-    pulseIntervalSec: Math.max(1, Number(process.env.PULSE_INTERVAL_SEC || 5)),
+    pulseIntervalSec: Math.max(1, Number(process.env.PULSE_INTERVAL_SEC || 3)),
     calibrationIntervalSec: Math.max(5, Number(process.env.CALIBRATION_INTERVAL_SEC || 60)),
   }
 }

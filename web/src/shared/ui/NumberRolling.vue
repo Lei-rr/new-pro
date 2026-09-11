@@ -15,7 +15,7 @@ const props = withDefaults(
     precision: 0,
     prefix: '',
     suffix: '',
-    duration: 900,
+    duration: 650,
     onlyUp: false,
   }
 )

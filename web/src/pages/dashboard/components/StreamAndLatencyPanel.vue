@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/sha
 import { Badge } from '@/shared/ui/badge'
 import { Progress } from '@/shared/ui/progress'
 import { formatNumber, formatTokens } from '@/shared/lib/utils'
+import NumberRolling from '@/shared/ui/NumberRolling.vue'
 
 const props = defineProps<{
   stream?: {
@@ -43,7 +44,7 @@ const props = defineProps<{
           </CardDescription>
         </div>
         <Badge variant="secondary" class="font-mono text-xs">
-          {{ stream?.streamPercentage ?? 0 }}% 流式率
+          <NumberRolling :value="stream?.streamPercentage ?? 0" :precision="1" suffix="%" /> 流式率
         </Badge>
       </CardHeader>
 
@@ -53,15 +54,15 @@ const props = defineProps<{
           <div class="flex items-center justify-between text-xs mb-1.5">
             <span class="text-muted-foreground flex items-center gap-1">
               <span class="size-2 rounded-full bg-sky-500"></span>
-              流式调用 ({{ stream?.streamPercentage ?? 0 }}%)
+              流式调用 (<NumberRolling :value="stream?.streamPercentage ?? 0" :precision="1" suffix="%" />)
             </span>
             <span class="text-muted-foreground flex items-center gap-1">
-              普通阻塞 ({{ Number((100 - (stream?.streamPercentage ?? 0)).toFixed(1)) }}%)
+              普通阻塞 (<NumberRolling :value="Number((100 - (stream?.streamPercentage ?? 0)).toFixed(1))" :precision="1" suffix="%" />)
               <span class="size-2 rounded-full bg-slate-300 dark:bg-slate-700"></span>
             </span>
           </div>
           <div class="h-2 w-full bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden flex">
-            <div class="bg-sky-500 h-full transition-all" :style="{ width: `${stream?.streamPercentage ?? 0}%` }"></div>
+            <div class="bg-sky-500 h-full transition-all duration-700" :style="{ width: `${stream?.streamPercentage ?? 0}%` }"></div>
             <div class="bg-slate-300 dark:bg-slate-700 h-full flex-1"></div>
           </div>
         </div>
@@ -74,15 +75,19 @@ const props = defineProps<{
               流式请求详情
             </div>
             <div class="text-lg font-mono font-bold mt-1 text-foreground">
-              {{ formatNumber(stream?.streamCount ?? 0) }} <span class="text-xs font-normal text-muted-foreground">次</span>
+              <NumberRolling :value="stream?.streamCount ?? 0" suffix="次" only-up />
             </div>
             <div class="text-[11px] text-muted-foreground mt-1 flex justify-between">
-              <span>平均均延:</span>
-              <span class="font-mono font-semibold text-foreground">{{ stream?.streamAvgLatency ?? 0 }}ms</span>
+              <span>平均延迟:</span>
+              <span class="font-mono font-semibold text-foreground">
+                <NumberRolling :value="stream?.streamAvgLatency ?? 0" suffix="ms" />
+              </span>
             </div>
             <div class="text-[11px] text-muted-foreground mt-0.5 flex justify-between">
               <span>承载Token:</span>
-              <span class="font-mono font-semibold text-foreground">{{ formatTokens(stream?.streamTokens ?? 0) }}</span>
+              <span class="font-mono font-semibold text-foreground">
+                <NumberRolling :value="stream?.streamTokens ?? 0" :format-fn="formatTokens" only-up />
+              </span>
             </div>
           </div>
 
@@ -92,15 +97,19 @@ const props = defineProps<{
               非流式普通调用
             </div>
             <div class="text-lg font-mono font-bold mt-1 text-foreground">
-              {{ formatNumber(stream?.nonStreamCount ?? 0) }} <span class="text-xs font-normal text-muted-foreground">次</span>
+              <NumberRolling :value="stream?.nonStreamCount ?? 0" suffix="次" only-up />
             </div>
             <div class="text-[11px] text-muted-foreground mt-1 flex justify-between">
-              <span>平均均延:</span>
-              <span class="font-mono font-semibold text-foreground">{{ stream?.nonStreamAvgLatency ?? 0 }}ms</span>
+              <span>平均延迟:</span>
+              <span class="font-mono font-semibold text-foreground">
+                <NumberRolling :value="stream?.nonStreamAvgLatency ?? 0" suffix="ms" />
+              </span>
             </div>
             <div class="text-[11px] text-muted-foreground mt-0.5 flex justify-between">
               <span>承载Token:</span>
-              <span class="font-mono font-semibold text-foreground">{{ formatTokens(stream?.nonStreamTokens ?? 0) }}</span>
+              <span class="font-mono font-semibold text-foreground">
+                <NumberRolling :value="stream?.nonStreamTokens ?? 0" :format-fn="formatTokens" only-up />
+              </span>
             </div>
           </div>
         </div>
@@ -133,7 +142,10 @@ const props = defineProps<{
               ⚡ 极速响应 (&lt; 500ms)
             </span>
             <span class="font-mono text-xs text-muted-foreground">
-              <span class="font-semibold text-foreground">{{ formatNumber(latency?.fastCount ?? 0) }}</span> 次 ({{ latency?.fastPct ?? 0 }}%)
+              <span class="font-semibold text-foreground">
+                <NumberRolling :value="latency?.fastCount ?? 0" suffix="次" only-up />
+              </span>
+              (<NumberRolling :value="latency?.fastPct ?? 0" :precision="1" suffix="%" />)
             </span>
           </div>
           <Progress class="h-1.5" :model-value="latency?.fastPct ?? 100" />
@@ -147,7 +159,10 @@ const props = defineProps<{
               🟢 正常响应 (500ms ~ 1.5s)
             </span>
             <span class="font-mono text-xs text-muted-foreground">
-              <span class="font-semibold text-foreground">{{ formatNumber(latency?.normalCount ?? 0) }}</span> 次 ({{ latency?.normalPct ?? 0 }}%)
+              <span class="font-semibold text-foreground">
+                <NumberRolling :value="latency?.normalCount ?? 0" suffix="次" only-up />
+              </span>
+              (<NumberRolling :value="latency?.normalPct ?? 0" :precision="1" suffix="%" />)
             </span>
           </div>
           <Progress class="h-1.5" :model-value="latency?.normalPct ?? 0" />
@@ -161,7 +176,10 @@ const props = defineProps<{
               🟡 较慢长尾 (1.5s ~ 3s)
             </span>
             <span class="font-mono text-xs text-muted-foreground">
-              <span class="font-semibold text-foreground">{{ formatNumber(latency?.slowCount ?? 0) }}</span> 次 ({{ latency?.slowPct ?? 0 }}%)
+              <span class="font-semibold text-foreground">
+                <NumberRolling :value="latency?.slowCount ?? 0" suffix="次" only-up />
+              </span>
+              (<NumberRolling :value="latency?.slowPct ?? 0" :precision="1" suffix="%" />)
             </span>
           </div>
           <Progress class="h-1.5" :model-value="latency?.slowPct ?? 0" />
@@ -175,7 +193,10 @@ const props = defineProps<{
               🔴 极慢卡顿 (&gt; 3s)
             </span>
             <span class="font-mono text-xs text-muted-foreground">
-              <span class="font-semibold text-foreground">{{ formatNumber(latency?.timeoutCount ?? 0) }}</span> 次 ({{ latency?.timeoutPct ?? 0 }}%)
+              <span class="font-semibold text-foreground">
+                <NumberRolling :value="latency?.timeoutCount ?? 0" suffix="次" only-up />
+              </span>
+              (<NumberRolling :value="latency?.timeoutPct ?? 0" :precision="1" suffix="%" />)
             </span>
           </div>
           <Progress class="h-1.5" :model-value="latency?.timeoutPct ?? 0" />
