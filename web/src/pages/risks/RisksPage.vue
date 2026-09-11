@@ -319,11 +319,18 @@ onUnmounted(() => {
                     恶意刷量
                   </Badge>
                   <Badge
+                    v-else-if="ip.riskType === 'quota_vampire'"
+                    class="text-[10px] px-1.5 py-0 h-4 border-purple-500/40 text-purple-600 dark:text-purple-400 bg-purple-500/10"
+                    variant="outline"
+                  >
+                    算力鲸吞
+                  </Badge>
+                  <Badge
                     v-else-if="ip.riskType === 'burst'"
                     class="text-[10px] px-1.5 py-0 h-4 border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-500/10"
                     variant="outline"
                   >
-                    短时突增
+                    恶霸挤占
                   </Badge>
                   <Badge
                     v-else-if="ip.riskType === 'high_failure'"
@@ -342,7 +349,10 @@ onUnmounted(() => {
                 </TableCell>
                 <TableCell class="text-right font-mono text-xs">
                   <div class="font-semibold">{{ ip.requestCount.toLocaleString() }} 次</div>
-                  <div v-if="ip.burst1m" class="text-[10px] text-amber-600 dark:text-amber-400">
+                  <div v-if="ip.costUsd && ip.costUsd >= 10" class="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
+                    ${{ ip.costUsd.toFixed(2) }}
+                  </div>
+                  <div v-else-if="ip.burst1m" class="text-[10px] text-amber-600 dark:text-amber-400">
                     1m: +{{ ip.burst1m }} 次
                   </div>
                 </TableCell>
