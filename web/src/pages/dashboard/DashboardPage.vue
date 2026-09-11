@@ -495,7 +495,7 @@ onUnmounted(() => {
               <NumberRolling :value="pulse?.tpm ?? 0" :format-fn="formatTokens" suffix="tok/min" />
             </div>
             <div class="text-[10px] text-muted-foreground mt-0.5">
-              1分钟活跃IP: <span class="font-medium text-foreground"><NumberRolling :value="pulse?.activeIps1m ?? 0" /></span> 个
+              实时秒级 TPS: <span class="font-medium text-foreground"><NumberRolling :value="Math.round((pulse?.tpm ?? 0) / 60)" :format-fn="formatTokens" /></span> tok/s
             </div>
           </div>
           <div class="size-9 rounded-lg bg-blue-500/10 text-blue-500 flex items-center justify-center">
@@ -623,15 +623,15 @@ onUnmounted(() => {
         </CardHeader>
         <CardContent class="text-xs text-muted-foreground space-y-1">
           <div class="flex items-center justify-between">
-            <span>IP 均调用量:</span>
+            <span>1分钟活跃 IP:</span>
             <span class="font-medium text-foreground">
-              <NumberRolling :value="overview?.summary?.avgReqPerIp ?? 0" suffix="次 / IP" only-up />
+              <NumberRolling :value="pulse?.activeIps1m ?? 0" suffix="个 IP" />
             </span>
           </div>
           <div class="flex items-center justify-between">
-            <span>IP 均消耗额:</span>
+            <span>IP 均调用量:</span>
             <span class="font-mono text-foreground">
-              <NumberRolling :value="overview?.summary?.avgCostPerIp ?? 0" prefix="$" :precision="2" suffix="/ IP" only-up />
+              <NumberRolling :value="overview?.summary?.avgReqPerIp ?? 0" suffix="次 / IP" only-up />
             </span>
           </div>
         </CardContent>
