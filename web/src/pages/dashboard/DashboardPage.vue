@@ -193,6 +193,22 @@ async function loadData(silent = false) {
     if (ovData?.summary?.maxLogId) {
       lastBaseLogId = Math.max(lastBaseLogId, ovData.summary.maxLogId)
     }
+
+    // 将接口中返回的当前周期全部真实已知 IP 预填充进集合，确保只有真正的全新 IP 才会触发 +1
+    if (ovData?.knownIpList?.length) {
+      ovData.knownIpList.forEach((ip: string) => {
+        if (ip) knownIps.add(ip)
+      })
+    } else if (ovData?.topIps?.length) {
+      ovData.topIps.forEach((item: any) => {
+        if (item.ip) knownIps.add(item.ip)
+      })
+    }
+    if (ovData?.recentLogs?.length) {
+      ovData.recentLogs.forEach((l: any) => {
+        if (l.ip) knownIps.add(l.ip)
+      })
+    }
     if (silent && overview.value?.summary && ovData?.summary) {
       // 静默校准时：保持单向单调递增，绝不倒退
       ovData.summary.totalRequests = Math.max(ovData.summary.totalRequests || 0, overview.value.summary.totalRequests || 0)

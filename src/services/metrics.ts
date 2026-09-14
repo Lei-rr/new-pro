@@ -345,12 +345,18 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     LIMIT 10
   `
 
-  // 13. 周期活跃 IP 终端规模统计
+  // 13. 周期活跃 IP 终端规模与已知 IP 集合 (供前端精准防重)
   const activeScaleSql = `
     SELECT 
       count(DISTINCT NULLIF(ip, '')) as active_ips
     FROM logs
     ${timeCondition}
+  `
+
+  const activeIpsListSql = `
+    SELECT DISTINCT ip
+    FROM logs
+    ${timeCondition} AND ip != ''
   `
 
   // 并行执行高性能聚合查询
@@ -368,6 +374,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     latencyBucketsRes,
     topIpsRes,
     activeScaleRes,
+    activeIpsListRes,
   ] = await Promise.all([
     db.query(summarySql),
     db.query(channelsSql),
@@ -382,6 +389,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     db.query(latencyBucketsSql),
     db.query(topIpsSql),
     db.query(activeScaleSql),
+    db.query(activeIpsListSql),
   ])
 
   const sRow = summaryRes.rows[0] || {}
@@ -581,6 +589,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
         failed: Number(r.failed || 0),
       }
     }),
+    knownIpList: activeIpsListRes.rows.map((r: any) => String(r.ip)),
   }
 
   // 写入缓存 4 秒 (足够平滑前端切换且避免瞬间高频击穿)

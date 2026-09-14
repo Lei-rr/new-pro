@@ -17,7 +17,7 @@
 ## 🌟 核心特性
 
 - ⚡ **毫秒级实时流式推流（零数据库查询压力）**
-  - 后端采用**单例广播引擎（Broadcaster）**：无连接时全自动休眠，有连接时全局唯一 2~3 秒极速心跳探针（仅查最近数十条日志，耗时 < 1ms），无论多少人同时打开网页，数据库开销始终只有 1 次轻量心跳。
+  - 后端采用**单例广播引擎（Broadcaster）**：无连接时全自动休眠，有连接时全局唯一 3 秒极速心跳探针（仅查最近数十条日志，耗时 < 1ms），无论多少人同时打开网页，数据库开销始终只有 1 次轻量心跳。
   - 前端监听实时流推流自增累加，数字像电表一样平滑滚动（硬件加速缓动），彻底解决高频查库痛点。
 
 - 📊 **多维宏观指标与专业 ECharts 图表**
@@ -27,10 +27,12 @@
   - **模型消耗演变分布**：直观对比各大模型在各时段的算力与额度占比。
   - **渠道 Uptime 矩阵**：上游各渠道状态、响应耗时、优先级权重及在线健康状态实时呈现。
 
-- 🛡️ **智能主动风控与异常告警（反爬 / 防刷 / 熔断）**
-  - **短时突发洪峰告警**：动态侦测 1 分钟 / 5 分钟并发暴增 IP。
-  - **恶意刷接口 / 恶意撞库侦测**：自动识别高失败率（>=70%）脚本死循环试探并打上【恶意刷量】紧急告警，支持一键复制高危 IP 快速封禁。
-  - **渠道故障熔断建议**：自动侦测异常上游渠道，给出下调权重或紧急禁用的处置建议。
+- 🛡️ **公益站专属实战风控（反爬 / 防刷 / 熔断）**
+  - **中转站套娃接走侦测（Relay Hijack）**：持续每分钟 60+ 次（或 5 分钟 200+ 次）高频抓取，识别套娃中转站薅羊毛行为。
+  - **单 IP 极端天量请求告警（Massive Volume）**：单 IP 周期内狂干几千上万次（≥ 5,000 次），防止单个黑产脚本独占资源。
+  - **持续恶意死循环刷接口拦截（Malicious Brute-Force）**：累计数百次请求且失败率 ≥ 70%，无视报错持续死循环刷接口，支持一键复制高危 IP 封禁。
+  - **主力渠道严重故障熔断**：放宽偶发错误容忍，只抓真正大面积瘫痪（≥ 50% 失败率）的主力渠道。
+  - **系统回环白名单免疫**：自动免死本机反代与内部网络，杜绝误报。
 
 - 🎨 **现代化 Clean Light 极简美学**
   - 深度适配 NewAPI 官方轻量视觉规范，提供精致的色彩微调、移动端横向平滑滑动适配与深浅色模式切换。
@@ -39,37 +41,57 @@
 
 ## 🚀 快速开始 (Docker Compose 部署)
 
-### 1. 获取 `docker-compose.yml`
+### 1. 获取配置文件
 
-在服务器新建目录并创建 `docker-compose.yml`：
+在服务器新建目录并下载或创建配置：
+
+```bash
+mkdir -p new-pro && cd new-pro
+```
+
+创建 `.env` 配置文件（填入您自己的数据库连接串）：
+
+```bash
+# 复制示例或直接新建 .env：
+cat << 'EOF' > .env
+NODE_ENV=production
+HOST=0.0.0.0
+PORT=3033
+LOG_LEVEL=info
+
+# 填入您的 NewAPI PostgreSQL 连接地址
+DATABASE_URL=postgresql://root:your_db_password@new-api-postgres:5432/new-api
+
+# 控制台管理员账号密码与会话密钥
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD_HASH=admin123
+JWT_SECRET=your_jwt_secret_random_key_change_me
+
+# 实时推流与宏观校准周期 (秒)
+PULSE_INTERVAL_SEC=3
+CALIBRATION_INTERVAL_SEC=60
+EOF
+```
+
+创建 `docker-compose.yml`：
 
 ```yaml
 services:
   new-pro:
     image: ghcr.io/lei-rr/new-pro:latest
     container_name: new-pro
-    restart: unless-stopped
+    restart: always
     ports:
-      - "3033:3033"
-    environment:
-      - NODE_ENV=production
-      - HOST=0.0.0.0
-      - PORT=3033
-      # 数据库连接串：填入你的 NewAPI PostgreSQL 连接地址
-      - DATABASE_URL=postgresql://root:your_db_password@new-api-postgres:5432/new-api
-      # 控制台管理员账号密码与会话密钥
-      - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD_HASH=admin123
-      - JWT_SECRET=your_jwt_secret_key_random_string
-      - LOG_LEVEL=info
+      - "${PORT:-3033}:${PORT:-3033}"
+    env_file:
+      - .env
     networks:
       - new-api_network
 
-# 若 new-api 运行在独立的 Docker 网络中，在此引入外部网络名称：
 networks:
   new-api_network:
     external: true
-    name: new-api_default # 改为您真实的 new-api 网络名（可通过 docker network ls 查看）
+    name: new-api_default # 改为您真实的 new-api 容器网络名（可通过 docker network ls 查看）
 ```
 
 ### 2. 启动服务
@@ -80,7 +102,7 @@ docker compose up -d
 
 ### 3. 登录访问
 
-在浏览器打开 `http://<服务器IP>:3033`，输入配置好的账号（默认 `admin`）和密码（默认 `admin123`）即可进入控制台大屏。
+在浏览器打开 `http://<服务器IP>:3033`，输入在 `.env` 中配置的用户名和密码即可进入控制台大屏。
 
 ---
 
@@ -94,9 +116,9 @@ docker compose up -d
 | `JWT_SECRET` | 否 | `new-pro-secret...` | 会话签名密钥（建议生产环境配置随机字符串） |
 | `PORT` | 否 | `3033` | 后端服务监听端口 |
 | `HOST` | 否 | `0.0.0.0` | 后端服务监听地址 |
-| `LOG_LEVEL` | 否 | `info` | 日志输出级别 (`debug`, `info`, `warn`, `error`) |
-| `PULSE_INTERVAL_SEC` | 否 | `5` | WebSocket 实时心跳推流间隔 (秒) |
+| `PULSE_INTERVAL_SEC` | 否 | `3` | WebSocket 实时心跳推流间隔 (秒) |
 | `CALIBRATION_INTERVAL_SEC` | 否 | `60` | 图表聚合与宏观指标全量静默校准间隔 (秒) |
+| `LOG_LEVEL` | 否 | `info` | 日志输出级别 (`debug`, `info`, `warn`, `error`) |
 
 ---
 
