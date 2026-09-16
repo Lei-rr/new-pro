@@ -1,11 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { useSessionStore } from '@/features/auth'
-
 import AppLayout from '@/app/layouts/AppLayout.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
-import DashboardPage from '@/pages/dashboard/DashboardPage.vue'
-import DimensionsPage from '@/pages/dimensions/DimensionsPage.vue'
-import RisksPage from '@/pages/risks/RisksPage.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -19,9 +15,21 @@ const router = createRouter({
       path: '/',
       component: AppLayout,
       children: [
-        { path: '', component: DashboardPage },
-        { path: 'dimensions', component: DimensionsPage },
-        { path: 'risks', component: RisksPage },
+        {
+          path: '',
+          name: 'dashboard',
+          component: () => import('@/pages/dashboard/DashboardPage.vue'),
+        },
+        {
+          path: 'dimensions',
+          name: 'dimensions',
+          component: () => import('@/pages/dimensions/DimensionsPage.vue'),
+        },
+        {
+          path: 'risks',
+          name: 'risks',
+          component: () => import('@/pages/risks/RisksPage.vue'),
+        },
       ],
     },
   ],

@@ -86,16 +86,16 @@ const chartOption = computed(() => {
       formatter: (params: any[]) => {
         if (!params?.length) return ''
         const title = dist.timePoints[params[0].dataIndex] || params[0].name
-        let html = `<div class="font-bold border-b border-slate-100 pb-1 mb-1.5 text-slate-800">${title}</div>`
+        let html = `<div style="font-weight: bold; border-bottom: 1px solid rgba(148, 163, 184, 0.2); padding-bottom: 4px; margin-bottom: 6px;">${title}</div>`
         params.forEach((p) => {
           const valDisplay = metricType.value === 'quota' ? `$${Number(p.value).toFixed(4)}` : formatTokens(p.value)
           html += `
-            <div class="flex items-center justify-between gap-6 py-0.5 text-xs">
-              <span class="flex items-center gap-1.5 truncate max-w-[150px]">
-                <span class="size-2 rounded-full inline-block shrink-0" style="background-color: ${p.color};"></span>
-                <span class="text-slate-600 truncate">${p.seriesName}</span>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 2px 0; font-size: 11px;">
+              <span style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;">
+                <span style="width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex-shrink: 0; background-color: ${p.color};"></span>
+                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${p.seriesName}</span>
               </span>
-              <span class="font-mono font-semibold text-slate-900">${valDisplay}</span>
+              <span style="font-family: monospace; font-weight: 600;">${valDisplay}</span>
             </div>
           `
         })

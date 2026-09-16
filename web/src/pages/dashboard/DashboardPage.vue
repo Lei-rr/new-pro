@@ -1,13 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, shallowRef, watch } from 'vue'
-import VChart from 'vue-echarts'
-import '@/shared/lib/echarts'
+import { ref, computed, watch } from 'vue'
 import {
   Activity,
-  ArrowUpRight,
   CheckCircle2,
   XCircle,
-  Coins,
   Gauge,
   Layers,
   Clock,
@@ -17,8 +13,6 @@ import {
   Pause,
   Play,
   Copy,
-  BarChart3,
-  AreaChart,
 } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
@@ -29,51 +23,35 @@ import { http } from '@/shared/api/http'
 import { useRealtimePulse } from '@/shared/api/websocket'
 import { toast } from '@/shared/lib/toast'
 import { errorMessage } from '@/shared/lib/errors'
-import { formatNumber, formatTokens, copyToClipboard } from '@/shared/lib/utils'
+import { formatTokens, copyToClipboard } from '@/shared/lib/utils'
 import { useSessionStore } from '@/features/auth'
+import { TIME_RANGES } from '@/shared/constants/time-ranges'
+import { useAutoRefresh } from '@/shared/composables/useAutoRefresh'
 import NumberRolling from '@/shared/ui/NumberRolling.vue'
 import ChannelUptimePanel from './components/ChannelUptimePanel.vue'
 import ConsumptionDistributionChart from './components/ConsumptionDistributionChart.vue'
 import PerformanceHealthPanel from './components/PerformanceHealthPanel.vue'
 import StreamAndLatencyPanel from './components/StreamAndLatencyPanel.vue'
-
-const timeRanges = [
-  { key: 'today', label: '今天(0点)' },
-  { key: '1h', label: '1小时' },
-  { key: '6h', label: '6小时' },
-  { key: '24h', label: '24小时' },
-  { key: '3d', label: '3天内' },
-  { key: '7d', label: '7天内' },
-  { key: '30d', label: '30天内' },
-  { key: 'all', label: '全部' },
-]
+import TrendMetricsChart from './components/TrendMetricsChart.vue'
 
 const currentRange = ref('today')
 const loading = ref(true)
 const overview = ref<any>(null)
 const sessionStore = useSessionStore()
 
-// 趋势图模式切换：bar (柱状堆叠) vs area (平滑面积流)
-const trendChartType = ref<'bar' | 'area'>('area')
+const { pulse } = useRealtimePulse()
 
-// 接入统一的 WebSocket 实时数据流
-const { pulse, isConnected: wsConnected } = useRealtimePulse()
-
-// 跟踪已累加的实时流水 ID 集合与已知 IP/用户集合
+// 跟踪已累加的流水 ID 集合与已知 IP/用户集合
 const processedLogIds = new Set<number>()
 const knownIps = new Set<string>()
 const knownUsers = new Set<string>()
-let autoRefreshTimer: NodeJS.Timeout | null = null
-
-// 记录基准最大日志 ID，仅累加新到达的日志
 let lastBaseLogId = 0
 
-// 监听 WebSocket 推送的实时流水，当为今天/全天跨度时，纯前端实时平滑累加宏观卡片指标（0 DB 开销）
+// 监听 WebSocket 推送的实时流水，前端实时平滑累加指标
 watch(
   () => pulse.value?.recentLogs,
   (logs) => {
     if (!logs || !logs.length || !overview.value?.summary) return
-    // 仅在统计范围包含当前实时时间（如今天、24h、全部）时进行前端自增累加
     if (!['today', '1h', '6h', '24h', '3d', '7d', '30d', 'all'].includes(currentRange.value)) return
 
     const summary = overview.value.summary
@@ -100,24 +78,21 @@ watch(
         addedFailed += 1
       }
 
-      // 实时动态捕获新活跃 IP
       if (log.ip && log.ip !== '-' && !knownIps.has(log.ip)) {
         knownIps.add(log.ip)
         addedIps += 1
       }
 
-      // 实时动态捕获新活跃用户
       if (log.username && log.username !== '系统' && !knownUsers.has(log.username)) {
         knownUsers.add(log.username)
         addedUsers += 1
       }
     }
 
-    // 防止 Set 无限膨胀，保持在最近 1000 条以内
     if (processedLogIds.size > 2000) {
       const arr = Array.from(processedLogIds)
       processedLogIds.clear()
-      arr.slice(-1000).forEach(id => processedLogIds.add(id))
+      arr.slice(-1000).forEach((id) => processedLogIds.add(id))
     }
 
     if (addedReq > 0) {
@@ -132,16 +107,12 @@ watch(
       if (addedIps > 0) {
         summary.activeIps = (summary.activeIps || 0) + addedIps
       }
-      // 实时联动计算 IP 均调用量与 IP 均消耗额
       if (summary.activeIps > 0) {
         summary.avgReqPerIp = Math.round(summary.totalRequests / summary.activeIps)
         summary.avgCostPerIp = Number((summary.totalCostUsd / summary.activeIps).toFixed(2))
       }
       if (addedUsers > 0) {
         summary.activeUsers = (summary.activeUsers || 0) + addedUsers
-      }
-      if (summary.activeUsers > 0) {
-        summary.avgCostPerUser = Number((summary.totalCostUsd / summary.activeUsers).toFixed(2))
       }
       if (summary.totalRequests > 0) {
         summary.successRate = Number(((summary.successRequests / summary.totalRequests) * 100).toFixed(2))
@@ -151,11 +122,10 @@ watch(
   { deep: true }
 )
 
-// 流水暂停/冻结查看机制
+// 流水暂停/冻结机制
 const isStreamPaused = ref(false)
 const frozenLogs = ref<any[]>([])
 
-// 动态展示的日志列表
 const displayLogs = computed(() => {
   if (isStreamPaused.value) {
     return frozenLogs.value
@@ -165,12 +135,10 @@ const displayLogs = computed(() => {
 
 function toggleStreamPause() {
   if (!isStreamPaused.value) {
-    // 暂停并锁定当前快照
     frozenLogs.value = [...(pulse.value?.recentLogs ?? [])]
     isStreamPaused.value = true
-    toast.info('实时流水已暂停，便于排查')
+    toast.info('实时流水已暂停')
   } else {
-    // 恢复实时跟随
     isStreamPaused.value = false
     toast.success('已恢复实时流水跟随')
   }
@@ -195,7 +163,6 @@ async function loadData(silent = false) {
       lastBaseLogId = Math.max(lastBaseLogId, ovData.summary.maxLogId)
     }
 
-    // 将接口中返回的当前周期全部真实已知 IP 预填充进集合，确保只有真正的全新 IP 才会触发 +1
     if (ovData?.knownIpList?.length) {
       ovData.knownIpList.forEach((ip: string) => {
         if (ip) knownIps.add(ip)
@@ -205,13 +172,8 @@ async function loadData(silent = false) {
         if (item.ip) knownIps.add(item.ip)
       })
     }
-    if (ovData?.recentLogs?.length) {
-      ovData.recentLogs.forEach((l: any) => {
-        if (l.ip) knownIps.add(l.ip)
-      })
-    }
+
     if (silent && overview.value?.summary && ovData?.summary) {
-      // 静默校准时：保持单向单调递增，绝不倒退
       ovData.summary.totalRequests = Math.max(ovData.summary.totalRequests || 0, overview.value.summary.totalRequests || 0)
       ovData.summary.successRequests = Math.max(ovData.summary.successRequests || 0, overview.value.summary.successRequests || 0)
       ovData.summary.failedRequests = Math.max(ovData.summary.failedRequests || 0, overview.value.summary.failedRequests || 0)
@@ -221,10 +183,6 @@ async function loadData(silent = false) {
       ovData.summary.promptTokens = Math.max(ovData.summary.promptTokens || 0, overview.value.summary.promptTokens || 0)
       ovData.summary.completionTokens = Math.max(ovData.summary.completionTokens || 0, overview.value.summary.completionTokens || 0)
       ovData.summary.activeIps = Math.max(ovData.summary.activeIps || 0, overview.value.summary.activeIps || 0)
-      ovData.summary.activeUsers = Math.max(ovData.summary.activeUsers || 0, overview.value.summary.activeUsers || 0)
-      if (ovData.summary.activeUsers > 0) {
-        ovData.summary.avgCostPerUser = Number((ovData.summary.totalCostUsd / ovData.summary.activeUsers).toFixed(2))
-      }
     }
     overview.value = ovData
   } catch (err) {
@@ -240,7 +198,6 @@ async function loadData(silent = false) {
 
 function selectRange(key: string) {
   currentRange.value = key
-  // 切换时间维度时重置
   lastBaseLogId = 0
   processedLogIds.clear()
   knownIps.clear()
@@ -248,204 +205,15 @@ function selectRange(key: string) {
   loadData()
 }
 
-// ECharts 响应式柱状/折线趋势混合图配置
-const chartOption = computed(() => {
-  const trend = overview.value?.trend || []
-  const xData = trend.map((t: any) => t.timePoint.split(' ')[1] || t.timePoint.slice(5))
-  const successData = trend.map((t: any) => t.success)
-  const failedData = trend.map((t: any) => t.failed)
-  const latencyData = trend.map((t: any) => t.avgLatency)
-
-  return {
-    tooltip: {
-      trigger: 'axis',
-      axisPointer: {
-        type: 'shadow',
-      },
-      backgroundColor: 'rgba(15, 23, 42, 0.85)',
-      borderColor: 'rgba(255, 255, 255, 0.1)',
-      textStyle: {
-        color: '#f8fafc',
-        fontSize: 12,
-      },
-      formatter: (params: any[]) => {
-        if (!params || !params.length) return ''
-        const idx = params[0].dataIndex
-        const item = trend[idx]
-        if (!item) return ''
-        return `
-          <div class="font-bold mb-1 border-b border-white/20 pb-1">${item.timePoint}</div>
-          <div class="flex justify-between gap-4"><span>总请求:</span><span class="font-mono font-semibold">${item.total.toLocaleString()}</span></div>
-          <div class="flex justify-between gap-4 text-emerald-400"><span>成功:</span><span class="font-mono font-semibold">${item.success.toLocaleString()}</span></div>
-          <div class="flex justify-between gap-4 text-rose-400"><span>失败:</span><span class="font-mono font-semibold">${item.failed.toLocaleString()}</span></div>
-          <div class="flex justify-between gap-4 text-sky-400"><span>消耗 Token:</span><span class="font-mono font-semibold">${formatTokens(item.tokens)}</span></div>
-          <div class="flex justify-between gap-4 text-amber-300"><span>平均延迟:</span><span class="font-mono font-semibold">${item.avgLatency}ms</span></div>
-        `
-      },
-    },
-    legend: {
-      data: ['成功', '失败', '延迟(ms)'],
-      left: 'center',
-      top: '0%',
-      textStyle: {
-        color: '#888888',
-        fontSize: 11,
-      },
-      itemWidth: 10,
-      itemHeight: 10,
-    },
-    grid: {
-      left: '1%',
-      right: '1%',
-      top: '16%',
-      bottom: '5%',
-      containLabel: true,
-    },
-    xAxis: {
-      type: 'category',
-      data: xData,
-      axisLine: { lineStyle: { color: 'rgba(128, 128, 128, 0.25)' } },
-      axisLabel: {
-        color: '#888888',
-        fontSize: 11,
-      },
-    },
-    yAxis: [
-      {
-        type: 'value',
-        name: '请求数',
-        nameTextStyle: { color: '#888888', fontSize: 11, padding: [0, 0, 4, 0] },
-        splitLine: { lineStyle: { color: 'rgba(128, 128, 128, 0.15)', type: 'dashed' } },
-        axisLabel: { color: '#888888', fontSize: 11 },
-      },
-      {
-        type: 'value',
-        name: '延迟 (ms)',
-        nameTextStyle: { color: '#888888', fontSize: 11, padding: [0, 0, 4, 0] },
-        splitLine: { show: false },
-        axisLabel: { color: '#888888', fontSize: 11 },
-      },
-    ],
-    series: trendChartType.value === 'area'
-      ? [
-          {
-            name: '成功',
-            type: 'line',
-            stack: 'total',
-            smooth: true,
-            showSymbol: false,
-            lineStyle: { width: 1.5, color: '#10b981' },
-            itemStyle: { color: '#10b981' },
-            areaStyle: {
-              opacity: 0.35,
-              color: '#10b981',
-            },
-            data: successData,
-          },
-          {
-            name: '失败',
-            type: 'line',
-            stack: 'total',
-            smooth: true,
-            showSymbol: false,
-            lineStyle: { width: 1.5, color: '#ef4444' },
-            itemStyle: { color: '#ef4444' },
-            areaStyle: {
-              opacity: 0.35,
-              color: '#ef4444',
-            },
-            data: failedData,
-          },
-          {
-            name: '延迟(ms)',
-            type: 'line',
-            yAxisIndex: 1,
-            smooth: true,
-            showSymbol: false,
-            itemStyle: {
-              color: '#0ea5e9',
-            },
-            lineStyle: {
-              width: 2,
-              color: '#0ea5e9',
-              shadowColor: 'rgba(14, 165, 233, 0.25)',
-              shadowBlur: 6,
-            },
-            data: latencyData,
-          },
-        ]
-      : [
-          {
-            name: '成功',
-            type: 'bar',
-            stack: 'total',
-            barMaxWidth: 24,
-            itemStyle: {
-              color: '#10b981',
-              borderRadius: [0, 0, 0, 0],
-            },
-            data: successData,
-          },
-          {
-            name: '失败',
-            type: 'bar',
-            stack: 'total',
-            barMaxWidth: 24,
-            itemStyle: {
-              color: '#ef4444',
-              borderRadius: [3, 3, 0, 0],
-            },
-            data: failedData,
-          },
-          {
-            name: '延迟(ms)',
-            type: 'line',
-            yAxisIndex: 1,
-            smooth: true,
-            showSymbol: false,
-            itemStyle: {
-              color: '#0ea5e9',
-            },
-            lineStyle: {
-              width: 2,
-              color: '#0ea5e9',
-              shadowColor: 'rgba(14, 165, 233, 0.25)',
-              shadowBlur: 6,
-            },
-            data: latencyData,
-          },
-        ],
-    dataZoom: [
-      {
-        type: 'inside',
-        start: 0,
-        end: 100,
-      },
-    ],
-  }
+// 自动后台静默校准，离开页面自动释放
+const calibMs = (sessionStore.calibrationIntervalSec || 60) * 1000
+useAutoRefresh(() => loadData(true), {
+  intervalMs: calibMs,
+  onRefreshEvent: () => loadData(false),
 })
 
-
-
-onMounted(() => {
-  loadData()
-  window.addEventListener('new-pro:refresh', () => loadData(false))
-  
-  // 按照分级策略：趋势图、模型消耗、SLA与渠道排行等全量聚合指标定时在后台静默校准一次
-  // （日常数字通过 WebSocket 推流精准自增，周期校准支持 compose 环境变量配置，默认 60 秒）
-  const calibMs = (sessionStore.calibrationIntervalSec || 60) * 1000
-  autoRefreshTimer = setInterval(() => {
-    loadData(true)
-  }, calibMs)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('new-pro:refresh', () => loadData(false))
-  if (autoRefreshTimer) {
-    clearInterval(autoRefreshTimer)
-    autoRefreshTimer = null
-  }
-})
+// 首屏加载
+loadData()
 </script>
 
 <template>
@@ -464,10 +232,9 @@ onUnmounted(() => {
         </p>
       </div>
 
-      <!-- 时间维度切换按钮组 (移动端横向无缝平滑滑动，避免撑破视口宽屏) -->
       <div class="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-lg border border-border/60 bg-muted/30 p-1">
         <Button
-          v-for="r in timeRanges"
+          v-for="r in TIME_RANGES"
           :key="r.key"
           size="xs"
           variant="ghost"
@@ -480,9 +247,8 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 实时指标横幅 (吞吐与健康) -->
+    <!-- 实时指标横幅 -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5 sm:gap-3">
-      <!-- QPS / RPM -->
       <Card class="border-border/60 shadow-xs bg-card/60 backdrop-blur-sm overflow-hidden">
         <CardContent class="p-3 sm:p-4 flex items-center justify-between gap-2">
           <div class="min-w-0 flex-1">
@@ -503,7 +269,6 @@ onUnmounted(() => {
         </CardContent>
       </Card>
 
-      <!-- TPM Token吞吐 -->
       <Card class="border-border/60 shadow-xs bg-card/60 backdrop-blur-sm overflow-hidden">
         <CardContent class="p-3 sm:p-4 flex items-center justify-between gap-2">
           <div class="min-w-0 flex-1">
@@ -524,7 +289,6 @@ onUnmounted(() => {
         </CardContent>
       </Card>
 
-      <!-- 实时平均延迟 -->
       <Card class="border-border/60 shadow-xs bg-card/60 backdrop-blur-sm overflow-hidden">
         <CardContent class="p-3 sm:p-4 flex items-center justify-between gap-2">
           <div class="min-w-0 flex-1">
@@ -552,7 +316,6 @@ onUnmounted(() => {
         </CardContent>
       </Card>
 
-      <!-- 实时成功率 -->
       <Card class="border-border/60 shadow-xs bg-card/60 backdrop-blur-sm overflow-hidden">
         <CardContent class="p-3 sm:p-4 flex items-center justify-between gap-2">
           <div class="min-w-0 flex-1">
@@ -681,81 +444,26 @@ onUnmounted(() => {
       </Card>
     </div>
 
-    <!-- 趋势图与渠道Uptime双列并排 -->
+    <!-- 趋势图与渠道可用率并排 -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-      <!-- 时序趋势条形分布图 (占 2 列) -->
-      <Card class="border-border/60 shadow-xs lg:col-span-2">
-        <CardHeader class="pb-2 flex flex-row items-center justify-between">
-          <div>
-            <CardTitle class="text-base font-semibold">请求与错误分布趋势</CardTitle>
-            <CardDescription class="text-xs">
-              时间跨度内各时段请求量、异常数与响应延迟走势
-            </CardDescription>
-          </div>
-
-          <!-- 趋势图模式切换：柱状堆叠 vs 面积流 -->
-          <div class="inline-flex rounded-lg border border-border/60 bg-muted/30 p-0.5">
-            <Button
-              size="xs"
-              variant="ghost"
-              class="h-6.5 text-xs px-2 rounded-md cursor-pointer transition-all gap-1"
-              :class="trendChartType === 'area' ? 'bg-card text-foreground shadow-xs font-semibold' : 'text-muted-foreground hover:text-foreground'"
-              @click="trendChartType = 'area'"
-              title="面积流图"
-            >
-              <AreaChart class="size-3.5" />
-              <span>面积流</span>
-            </Button>
-            <Button
-              size="xs"
-              variant="ghost"
-              class="h-6.5 text-xs px-2 rounded-md cursor-pointer transition-all gap-1"
-              :class="trendChartType === 'bar' ? 'bg-card text-foreground shadow-xs font-semibold' : 'text-muted-foreground hover:text-foreground'"
-              @click="trendChartType = 'bar'"
-              title="柱状堆叠图"
-            >
-              <BarChart3 class="size-3.5" />
-              <span>柱状</span>
-            </Button>
-          </div>
-        </CardHeader>
-        <CardContent class="pt-2">
-          <div v-if="overview?.trend && overview.trend.length > 0" class="h-64 w-full">
-            <VChart :option="chartOption" autoresize class="h-full w-full" />
-          </div>
-          <div v-else class="h-44 flex items-center justify-center text-xs text-muted-foreground">
-            所选时段内暂无日志调用
-          </div>
-        </CardContent>
-      </Card>
-
-      <!-- 核心渠道可用率与存活监测矩阵 (占 1 列) -->
-      <ChannelUptimePanel
-        :channels="overview?.topChannels"
-      />
+      <TrendMetricsChart :trend="overview?.trend" />
+      <ChannelUptimePanel :channels="overview?.topChannels" />
     </div>
 
     <!-- 核心模型消耗分布 (2列) + 性能健康度面板 (1列) -->
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div class="lg:col-span-2">
-        <ConsumptionDistributionChart
-          :distribution="overview?.modelConsumptionDistribution"
-        />
+        <ConsumptionDistributionChart :distribution="overview?.modelConsumptionDistribution" />
       </div>
       <div>
-        <PerformanceHealthPanel
-          :health="overview?.performanceHealth"
-        />
+        <PerformanceHealthPanel :health="overview?.performanceHealth" />
       </div>
     </div>
 
-    <!-- 流式效能对比与响应延迟阶梯 SLA 稳定性透视 -->
-    <StreamAndLatencyPanel
-      :stream="overview?.streamEfficiency"
-      :latency="overview?.latencyBuckets"
-    />
+    <!-- 流式效能对比与响应延迟阶梯 -->
+    <StreamAndLatencyPanel :stream="overview?.streamEfficiency" :latency="overview?.latencyBuckets" />
 
-    <!-- 最近实时流式日志片段 -->
+    <!-- 最近实时流水表格 -->
     <Card class="border-border/60 shadow-xs">
       <CardHeader class="pb-3 flex flex-row items-center justify-between">
         <div>
@@ -768,7 +476,7 @@ onUnmounted(() => {
               Live Stream
             </Badge>
           </CardTitle>
-          <CardDescription class="text-xs">实时直连捕获的最新调用流水，支持暂停排查与一键提取详情</CardDescription>
+          <CardDescription class="text-xs">实时捕获的最新调用流水，支持暂停排查与一键提取详情</CardDescription>
         </div>
         <div class="flex items-center gap-2">
           <Button

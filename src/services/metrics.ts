@@ -1,127 +1,11 @@
 import { getDb } from '../db.js'
-import { parseTimeRange, type TimeRangeKey } from './time-ranges.js'
+import { parseTimeRange } from './time-ranges.js'
 import { memoryCache } from './cache.js'
 import { getIpLocation } from './geoip.js'
+import { quotaToUsd, calcRate } from './calc.js'
+import type { OverviewMetrics, TimeRangeKey, ChannelStatusItem } from '../types/index.js'
 
-export interface OverviewMetrics {
-  timeRange: {
-    key: string
-    label: string
-    startTime: number
-    endTime: number
-  }
-  summary: {
-    totalRequests: number
-    successRequests: number
-    failedRequests: number
-    successRate: number
-    totalQuota: number
-    totalCostUsd: number
-    avgLatencyMs: number
-    promptTokens: number
-    completionTokens: number
-    totalTokens: number
-    maxLogId: number
-    activeIps: number
-    avgReqPerIp: number
-    avgCostPerIp: number
-  }
-  channelsStatus: {
-    total: number
-    active: number
-    disabled: number
-    channels: Array<{
-      id: number
-      name: string
-      type: number
-      status: number
-      priority: number
-      weight: number
-      responseTime: number
-      testTime: number
-    }>
-  }
-  trend: Array<{
-    timePoint: string
-    total: number
-    success: number
-    failed: number
-    quota: number
-    tokens: number
-    avgLatency: number
-  }>
-  topModels: Array<{
-    name: string
-    count: number
-    quota: number
-    tokens: number
-  }>
-  topUsers: Array<{
-    name: string
-    count: number
-    quota: number
-  }>
-  topChannels: Array<{
-    id: number
-    name: string
-    count: number
-    failed: number
-    avgLatency: number
-  }>
-  topIps: Array<{
-    ip: string
-    location?: string
-    count: number
-    tokens: number
-    quota: number
-    costUsd: number
-    failed: number
-  }>
-  dbStats: {
-    totalLogsInDb: number
-    activeChannelsCount: number
-    totalUsersCount: number
-  }
-  modelConsumptionDistribution: {
-    timePoints: string[]
-    models: string[]
-    series: Array<{
-      modelName: string
-      quotaData: number[]
-      tokensData: number[]
-    }>
-  }
-  performanceHealth: {
-    systemSuccessRate: number
-    avgLatencyMs: number
-    tpsTokensPerSec: number
-    topModelsHealth: Array<{
-      modelName: string
-      successRate: number
-      count: number
-      avgLatency: number
-    }>
-  }
-  streamEfficiency: {
-    streamCount: number
-    nonStreamCount: number
-    streamPercentage: number
-    streamAvgLatency: number
-    nonStreamAvgLatency: number
-    streamTokens: number
-    nonStreamTokens: number
-  }
-  latencyBuckets: {
-    fastCount: number      // <500ms
-    normalCount: number    // 500ms-1.5s
-    slowCount: number      // 1.5s-3s
-    timeoutCount: number   // >3s
-    fastPct: number
-    normalPct: number
-    slowPct: number
-    timeoutPct: number
-  }
-}
+export type { OverviewMetrics }
 
 export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Promise<OverviewMetrics> {
   const cacheKey = `overview:${rangeKey}`
@@ -130,9 +14,15 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
 
   const db = getDb()
   const filter = parseTimeRange(rangeKey)
+  const params: unknown[] = []
+  let timeCondition = ''
+  let andTimeCondition = ''
 
-  const timeCondition = filter.startTime > 0 ? `WHERE created_at >= ${filter.startTime} AND created_at <= ${filter.endTime}` : ''
-  const andTimeCondition = filter.startTime > 0 ? `AND created_at >= ${filter.startTime} AND created_at <= ${filter.endTime}` : ''
+  if (filter.startTime > 0) {
+    params.push(filter.startTime, filter.endTime)
+    timeCondition = 'WHERE created_at >= $1 AND created_at <= $2'
+    andTimeCondition = 'AND created_at >= $1 AND created_at <= $2'
+  }
 
   // 1. 总体概览数据：成功数(type=2)，失败数(type=5)，总配额，Token与耗时
   const summarySql = `
@@ -157,9 +47,8 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
   `
 
   // 3. 时间序列趋势
-  // 当时间跨度 >= 7 天时：启用 NewAPI 官方 quota_data 预聚合表加速长期趋势，并将最近未入表的 logs 补齐
   const isLongTerm = ['7d', '30d', 'all'].includes(rangeKey)
-  let trendFormat = isLongTerm || rangeKey === '3d' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH24:00'
+  const trendFormat = isLongTerm || rangeKey === '3d' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH24:00'
 
   const trendSql = isLongTerm
     ? `
@@ -173,7 +62,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
           COALESCE(sum(token_used), 0) as tokens,
           0::bigint as avg_latency
         FROM quota_data
-        ${filter.startTime > 0 ? `WHERE created_at >= ${filter.startTime} AND created_at <= ${filter.endTime}` : ''}
+        ${timeCondition}
         GROUP BY time_point
       ),
       recent AS (
@@ -248,7 +137,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     LIMIT 8
   `
 
-  // 6. TOP 8 渠道调用
+  // 6. TOP 8 渠道
   const topChannelsSql = `
     SELECT 
       l.channel_id as id,
@@ -264,7 +153,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     LIMIT 8
   `
 
-  // 7. 数据库基础总量 (利用 max(id) 秒级获取日志总数，避免 150ms 的全表扫描)
+  // 7. 数据库基础总量
   const dbStatsSql = `
     SELECT 
       (SELECT count(*) FROM channels) as channels_count,
@@ -272,7 +161,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
       (SELECT COALESCE(max(id), 0) FROM logs) as logs_count
   `
 
-  // 8. 官方同款：TOP 5 核心模型消耗分布矩阵 (按时间分段统计)
+  // 8. TOP 5 模型消耗分布矩阵
   const modelDistSql = `
     WITH target_top_models AS (
       SELECT model_name
@@ -294,7 +183,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     ORDER BY time_point ASC
   `
 
-  // 9. 官方同款：头部模型健康率 (Performance Health)
+  // 9. 头部模型健康率
   const modelHealthSql = `
     SELECT 
       COALESCE(NULLIF(model_name, ''), '未知模型') as model_name,
@@ -308,7 +197,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     LIMIT 6
   `
 
-  // 10. 流式吞吐对比 (Stream vs Non-stream)
+  // 10. 流式吞吐对比
   const streamSql = `
     SELECT 
       is_stream,
@@ -320,7 +209,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     GROUP BY is_stream
   `
 
-  // 11. 延迟阶梯分级 (<500ms, 500ms-1.5s, 1.5s-3s, >3s)
+  // 11. 延迟阶梯分级
   const latencyBucketsSql = `
     SELECT 
       count(*) as total,
@@ -332,7 +221,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     WHERE type = 2 ${andTimeCondition}
   `
 
-  // 12. IP 排行榜 (请求次数 & Token 消耗前 10)
+  // 12. IP 排行榜
   const topIpsSql = `
     SELECT 
       COALESCE(NULLIF(ip, ''), '未知IP') as ip,
@@ -347,7 +236,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     LIMIT 10
   `
 
-  // 13. 周期活跃 IP 终端规模与已知 IP 集合 (供前端精准防重)
+  // 13. 周期活跃 IP 终端规模与已知 IP 集合
   const activeScaleSql = `
     SELECT 
       count(DISTINCT NULLIF(ip, '')) as active_ips
@@ -355,10 +244,11 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     ${timeCondition}
   `
 
+  const activeIpsWhere = timeCondition ? `${timeCondition} AND ip != ''` : `WHERE ip != ''`
   const activeIpsListSql = `
     SELECT DISTINCT ip
     FROM logs
-    ${timeCondition} AND ip != ''
+    ${activeIpsWhere}
   `
 
   // 并行执行高性能聚合查询
@@ -378,20 +268,20 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     activeScaleRes,
     activeIpsListRes,
   ] = await Promise.all([
-    db.query(summarySql),
+    db.query(summarySql, params),
     db.query(channelsSql),
-    db.query(trendSql),
-    db.query(topModelsSql),
-    db.query(topUsersSql),
-    db.query(topChannelsSql),
+    db.query(trendSql, params),
+    db.query(topModelsSql, params),
+    db.query(topUsersSql, params),
+    db.query(topChannelsSql, params),
     db.query(dbStatsSql),
-    db.query(modelDistSql),
-    db.query(modelHealthSql),
-    db.query(streamSql),
-    db.query(latencyBucketsSql),
-    db.query(topIpsSql),
-    db.query(activeScaleSql),
-    db.query(activeIpsListSql),
+    db.query(modelDistSql, params),
+    db.query(modelHealthSql, params),
+    db.query(streamSql, params),
+    db.query(latencyBucketsSql, params),
+    db.query(topIpsSql, params),
+    db.query(activeScaleSql, params),
+    db.query(activeIpsListSql, params),
   ])
 
   const sRow = summaryRes.rows[0] || {}
@@ -403,11 +293,10 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
   const completionTokens = Number(sRow.completion_tokens || 0)
   const totalTokens = promptTokens + completionTokens
   const avgLatencyMs = Number(sRow.avg_latency || 0)
-  const successRate = totalRequests > 0 ? Number(((successRequests / totalRequests) * 100).toFixed(2)) : 100
-  // NewAPI quota: 500000 quota = $1 USD
-  const totalCostUsd = Number((totalQuota / 500000).toFixed(4))
+  const successRate = calcRate(successRequests, totalRequests)
+  const totalCostUsd = quotaToUsd(totalQuota)
 
-  const allChannels = channelsRes.rows.map((r: any) => ({
+  const allChannels: ChannelStatusItem[] = channelsRes.rows.map((r: any) => ({
     id: Number(r.id),
     name: r.name || `渠道 #${r.id}`,
     type: Number(r.type || 1),
@@ -423,7 +312,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
   const avgReqPerIp = activeIps > 0 ? Math.round(totalRequests / activeIps) : 0
   const avgCostPerIp = activeIps > 0 ? Number((totalCostUsd / activeIps).toFixed(2)) : 0
 
-  return {
+  const result: OverviewMetrics = {
     timeRange: filter,
     summary: {
       totalRequests,
@@ -525,7 +414,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
         const succ = Number(r.success || 0)
         return {
           modelName: String(r.model_name),
-          successRate: tot > 0 ? Number(((succ / tot) * 100).toFixed(1)) : 100,
+          successRate: calcRate(succ, tot, 1),
           count: tot,
           avgLatency: Number(r.avg_latency || 0),
         }
@@ -554,7 +443,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
       return {
         streamCount,
         nonStreamCount,
-        streamPercentage: total > 0 ? Number(((streamCount / total) * 100).toFixed(1)) : 0,
+        streamPercentage: calcRate(streamCount, total, 1),
         streamAvgLatency,
         nonStreamAvgLatency,
         streamTokens,
@@ -574,10 +463,10 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
         normalCount,
         slowCount,
         timeoutCount,
-        fastPct: total > 0 ? Number(((fastCount / total) * 100).toFixed(1)) : 100,
-        normalPct: total > 0 ? Number(((normalCount / total) * 100).toFixed(1)) : 0,
-        slowPct: total > 0 ? Number(((slowCount / total) * 100).toFixed(1)) : 0,
-        timeoutPct: total > 0 ? Number(((timeoutCount / total) * 100).toFixed(1)) : 0,
+        fastPct: calcRate(fastCount, total, 1),
+        normalPct: calcRate(normalCount, total, 1),
+        slowPct: calcRate(slowCount, total, 1),
+        timeoutPct: calcRate(timeoutCount, total, 1),
       }
     })(),
     topIps: await Promise.all(
@@ -590,7 +479,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
           count: Number(r.count || 0),
           tokens: Number(r.tokens || 0),
           quota: q,
-          costUsd: Number((q / 500000).toFixed(4)),
+          costUsd: quotaToUsd(q),
           failed: Number(r.failed || 0),
         }
       })
@@ -598,7 +487,7 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
     knownIpList: activeIpsListRes.rows.map((r: any) => String(r.ip)),
   }
 
-  // 写入缓存 4 秒 (足够平滑前端切换且避免瞬间高频击穿)
+  // 写入缓存 4 秒 (平滑前端切换且避免瞬间高频击穿)
   memoryCache.set(cacheKey, result, 4000)
 
   return result

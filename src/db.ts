@@ -11,12 +11,7 @@ export function initDb(dsn: string): pg.Pool {
       max: 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
-    })
-
-    pool.on('connect', (client) => {
-      client.query("SET timezone = 'Asia/Shanghai';").catch((err) => {
-        console.error('[DB Set Timezone Error]', err)
-      })
+      options: '-c timezone=Asia/Shanghai',
     })
 
     pool.on('error', (err) => {
@@ -33,13 +28,26 @@ export function getDb(): pg.Pool {
   return pool
 }
 
+export async function query<R extends pg.QueryResultRow = any>(
+  text: string,
+  params?: any[]
+): Promise<pg.QueryResult<R>> {
+  return getDb().query<R>(text, params)
+}
+
 export async function checkDbConnection(): Promise<boolean> {
   try {
-    const p = getDb()
-    const res = await p.query('SELECT 1 as alive')
+    const res = await query('SELECT 1 as alive')
     return res.rows.length > 0
   } catch (err) {
     console.error('Database connection test failed:', err)
     return false
+  }
+}
+
+export async function closeDb(): Promise<void> {
+  if (pool) {
+    await pool.end()
+    pool = null
   }
 }

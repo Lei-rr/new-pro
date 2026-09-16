@@ -10,7 +10,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import { loadConfig } from './config.js'
-import { initDb } from './db.js'
+import { initDb, closeDb } from './db.js'
 import { registerApiRoutes } from './routes.js'
 
 const __filename = fileURLToPath(import.meta.url)
@@ -55,6 +55,17 @@ await server.register(compress)
 // 注册 API 路由
 await server.register(registerApiRoutes, { prefix: '/api' })
 
+// 全局异常处理器，统一错误响应格式
+server.setErrorHandler((error: any, _request, reply) => {
+  server.log.error(error)
+  const statusCode = typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600 ? error.statusCode : 500
+  const message = statusCode === 500 ? '服务器内部错误，请稍后重试' : (error?.message || '请求处理异常')
+  reply.status(statusCode).send({
+    success: false,
+    error: message,
+  })
+})
+
 // 静态资源托管（打包后 web 产物）
 const webDistPath = path.resolve(process.cwd(), 'web/dist')
 if (fs.existsSync(webDistPath)) {
@@ -79,6 +90,7 @@ for (const signal of closeSignals) {
   process.on(signal, async () => {
     server.log.info(`Received ${signal}, closing server gracefully...`)
     await server.close()
+    await closeDb()
     process.exit(0)
   })
 }

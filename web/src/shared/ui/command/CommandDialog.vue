@@ -5,17 +5,7 @@ import { Dialog, DialogContent } from '@/shared/ui/dialog'
 import { Badge } from '@/shared/ui/badge'
 import { Separator } from '@/shared/ui/separator'
 import { cn } from '@/shared/lib/utils'
-import type { Component } from 'vue'
-
-export interface CommandItem {
-  id: string
-  title: string
-  subtitle?: string
-  category: string
-  icon: Component
-  badge?: string
-  action: () => void
-}
+import type { CommandItem } from './types.js'
 
 const open = defineModel<boolean>('open', { required: true })
 

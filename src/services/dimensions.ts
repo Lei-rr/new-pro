@@ -1,46 +1,17 @@
-import { getDb } from '../db.js'
-import { parseTimeRange, type TimeRangeKey } from './time-ranges.js'
+import { query } from '../db.js'
+import { parseTimeRange } from './time-ranges.js'
 import { memoryCache } from './cache.js'
 import { getIpLocation } from './geoip.js'
+import { quotaToUsd, calcRate } from './calc.js'
+import type {
+  DimensionType,
+  DimensionItem,
+  DimensionAnalysisResult,
+  DimensionFilterOptions,
+  TimeRangeKey,
+} from '../types/index.js'
 
-export type DimensionType = 'group' | 'user' | 'channel' | 'ip' | 'model'
-
-export interface DimensionItem {
-  id: string
-  name: string
-  location?: string
-  totalRequests: number
-  successRequests: number
-  failedRequests: number
-  successRate: number
-  totalQuota: number
-  costUsd: number
-  promptTokens: number
-  completionTokens: number
-  totalTokens: number
-  avgLatencyMs: number
-  firstSeen?: string
-  lastSeen?: string
-}
-
-export interface DimensionAnalysisResult {
-  dimension: DimensionType
-  timeRange: {
-    key: string
-    label: string
-    startTime: number
-    endTime: number
-  }
-  totalEntities: number
-  items: DimensionItem[]
-}
-
-export interface DimensionFilterOptions {
-  model?: string
-  channelId?: number
-  username?: string
-  group?: string
-}
+export type { DimensionType, DimensionItem, DimensionAnalysisResult, DimensionFilterOptions }
 
 export async function getDimensionAnalysis(
   dimension: DimensionType,
@@ -48,31 +19,37 @@ export async function getDimensionAnalysis(
   limit: number = 50,
   filters: DimensionFilterOptions = {}
 ): Promise<DimensionAnalysisResult> {
-  const cacheKey = `dimension:${dimension}:${rangeKey}:${limit}:${JSON.stringify(filters)}`
+  const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
+  const cacheKey = `dimension:${dimension}:${rangeKey}:${safeLimit}:${JSON.stringify(filters)}`
   const cached = memoryCache.get<DimensionAnalysisResult>(cacheKey)
   if (cached) return cached
 
-  const db = getDb()
   const filter = parseTimeRange(rangeKey)
-  
   const whereClauses: string[] = ['l.type IN (2, 5)']
+  const params: unknown[] = []
+
   if (filter.startTime > 0) {
-    whereClauses.push(`l.created_at >= ${filter.startTime} AND l.created_at <= ${filter.endTime}`)
+    params.push(filter.startTime, filter.endTime)
+    whereClauses.push(`l.created_at >= $${params.length - 1} AND l.created_at <= $${params.length}`)
   }
   if (filters.model) {
-    whereClauses.push(`l.model_name = '${filters.model.replace(/'/g, "''")}'`)
+    params.push(filters.model)
+    whereClauses.push(`l.model_name = $${params.length}`)
   }
   if (filters.channelId) {
-    whereClauses.push(`l.channel_id = ${filters.channelId}`)
+    params.push(Number(filters.channelId))
+    whereClauses.push(`l.channel_id = $${params.length}`)
   }
   if (filters.username) {
-    whereClauses.push(`l.username = '${filters.username.replace(/'/g, "''")}'`)
+    params.push(filters.username)
+    whereClauses.push(`l.username = $${params.length}`)
   }
   if (filters.group) {
-    whereClauses.push(`l."group" = '${filters.group.replace(/'/g, "''")}'`)
+    params.push(filters.group)
+    whereClauses.push(`l."group" = $${params.length}`)
   }
 
-  const timeCondition = whereClauses.length > 0 ? `WHERE ${whereClauses.join(' AND ')}` : ''
+  const timeCondition = `WHERE ${whereClauses.join(' AND ')}`
 
   let selectField = ''
   let groupField = ''
@@ -97,10 +74,14 @@ export async function getDimensionAnalysis(
       groupField = `l.ip`
       break
     case 'model':
+    default:
       selectField = `COALESCE(NULLIF(l.model_name, ''), '未知模型') as entity_id, COALESCE(NULLIF(l.model_name, ''), '未知模型') as entity_name`
       groupField = `l.model_name`
       break
   }
+
+  params.push(safeLimit)
+  const limitPlaceholder = `$${params.length}`
 
   const querySql = `
     SELECT 
@@ -119,10 +100,10 @@ export async function getDimensionAnalysis(
     ${timeCondition}
     GROUP BY ${groupField}
     ORDER BY total_requests DESC
-    LIMIT ${limit}
+    LIMIT ${limitPlaceholder}
   `
 
-  const res = await db.query(querySql)
+  const res = await query(querySql, params)
 
   const items: DimensionItem[] = await Promise.all(
     res.rows.map(async (r: any) => {
@@ -133,10 +114,9 @@ export async function getDimensionAnalysis(
       const promptTokens = Number(r.prompt_tokens || 0)
       const completionTokens = Number(r.completion_tokens || 0)
       const avgLatency = Number(r.avg_latency || 0)
-      const successRate = total > 0 ? Number(((success / total) * 100).toFixed(2)) : 100
+      const successRate = calcRate(success, total)
       const entityId = String(r.entity_id)
 
-      // 若当前维度是 IP，则通过双层缓存引擎异步解析归属地
       let location: string | undefined
       if (dimension === 'ip') {
         location = await getIpLocation(entityId)
@@ -151,7 +131,7 @@ export async function getDimensionAnalysis(
         failedRequests: failed,
         successRate,
         totalQuota: quota,
-        costUsd: Number((quota / 500000).toFixed(4)),
+        costUsd: quotaToUsd(quota),
         promptTokens,
         completionTokens,
         totalTokens: promptTokens + completionTokens,

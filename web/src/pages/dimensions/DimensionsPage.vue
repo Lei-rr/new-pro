@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed } from 'vue'
+import { useRoute } from 'vue-router'
 import {
   Layers,
   Users,
@@ -23,11 +23,13 @@ import { http } from '@/shared/api/http'
 import { toast } from '@/shared/lib/toast'
 import { errorMessage } from '@/shared/lib/errors'
 import { formatNumber, formatTokens } from '@/shared/lib/utils'
+import { TIME_RANGES } from '@/shared/constants/time-ranges'
+import { useAutoRefresh } from '@/shared/composables/useAutoRefresh'
+import { exportToCsv } from '@/shared/composables/useCsvExport'
 
 type DimensionType = 'group' | 'user' | 'channel' | 'ip' | 'model'
 
 const route = useRoute()
-const router = useRouter()
 
 const dimensions = [
   { key: 'group' as DimensionType, label: '分组维度', icon: Layers, desc: '按用户组(default/VIP等)聚合' },
@@ -35,17 +37,6 @@ const dimensions = [
   { key: 'channel' as DimensionType, label: '渠道维度', icon: Radio, desc: '按上游提供商与中转路由聚合' },
   { key: 'ip' as DimensionType, label: 'IP 地址维度', icon: Globe2, desc: '按客户端访问公网IP聚合' },
   { key: 'model' as DimensionType, label: '模型维度', icon: Cpu, desc: '按具体 LLM 模型名称聚合' },
-]
-
-const timeRanges = [
-  { key: 'today', label: '今天(0点)' },
-  { key: '1h', label: '1小时' },
-  { key: '6h', label: '6小时' },
-  { key: '24h', label: '24小时' },
-  { key: '3d', label: '3天内' },
-  { key: '7d', label: '7天内' },
-  { key: '30d', label: '30天内' },
-  { key: 'all', label: '全部' },
 ]
 
 const currentDim = ref<DimensionType>((route.query.dimension as DimensionType) || 'group')
@@ -58,8 +49,8 @@ const sortAsc = ref(false)
 const loading = ref(true)
 const result = ref<any>(null)
 
-async function loadData() {
-  loading.value = true
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   try {
     let url = `/api/analytics/dimensions?dimension=${currentDim.value}&range=${currentRange.value}&limit=100`
     if (activeModelFilter.value) url += `&model=${encodeURIComponent(activeModelFilter.value)}`
@@ -68,9 +59,9 @@ async function loadData() {
     const res = await http.get(url)
     result.value = res
   } catch (err) {
-    toast.error(errorMessage(err))
+    if (!silent) toast.error(errorMessage(err))
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -112,16 +103,17 @@ const filteredAndSortedItems = computed(() => {
 
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.trim().toLowerCase()
-    items = items.filter((it: any) =>
-      it.name.toLowerCase().includes(q) ||
-      it.id.toLowerCase().includes(q) ||
-      (it.location && it.location.toLowerCase().includes(q))
+    items = items.filter(
+      (it: any) =>
+        it.name.toLowerCase().includes(q) ||
+        it.id.toLowerCase().includes(q) ||
+        (it.location && it.location.toLowerCase().includes(q))
     )
   }
 
   items.sort((a: any, b: any) => {
-    let vA = a[sortField.value]
-    let vB = b[sortField.value]
+    const vA = a[sortField.value]
+    const vB = b[sortField.value]
     if (typeof vA === 'string') {
       return sortAsc.value ? vA.localeCompare(vB) : vB.localeCompare(vA)
     }
@@ -131,7 +123,7 @@ const filteredAndSortedItems = computed(() => {
   return items
 })
 
-function exportCsv() {
+function handleExportCsv() {
   if (!filteredAndSortedItems.value.length) return
   const isIp = currentDim.value === 'ip'
   const headers = isIp
@@ -141,8 +133,8 @@ function exportCsv() {
   const rows = filteredAndSortedItems.value.map((i: any) => {
     if (isIp) {
       return [
-        `"${i.name}"`,
-        `"${i.location || '-'}"`,
+        i.name,
+        i.location || '-',
         i.totalRequests,
         i.successRequests,
         i.failedRequests,
@@ -150,12 +142,12 @@ function exportCsv() {
         i.costUsd,
         i.totalTokens,
         i.avgLatencyMs,
-        `"${i.firstSeen || ''}"`,
-        `"${i.lastSeen || ''}"`,
+        i.firstSeen || '',
+        i.lastSeen || '',
       ]
     }
     return [
-      `"${i.name}"`,
+      i.name,
       i.totalRequests,
       i.successRequests,
       i.failedRequests,
@@ -163,69 +155,43 @@ function exportCsv() {
       i.costUsd,
       i.totalTokens,
       i.avgLatencyMs,
-      `"${i.firstSeen || ''}"`,
-      `"${i.lastSeen || ''}"`,
+      i.firstSeen || '',
+      i.lastSeen || '',
     ]
   })
-  const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `NewAPI-${currentDim.value}-${currentRange.value}.csv`
-  a.click()
-  URL.revokeObjectURL(url)
-  toast.success('已导出分析数据 CSV')
+
+  exportToCsv(`NewAPI-${currentDim.value}-${currentRange.value}`, headers, rows)
 }
 
-let autoRefreshTimer: any = null
-
-async function silentRefresh() {
-  try {
-    let url = `/api/analytics/dimensions?dimension=${currentDim.value}&range=${currentRange.value}&limit=100`
-    if (activeModelFilter.value) url += `&model=${encodeURIComponent(activeModelFilter.value)}`
-    if (activeUserFilter.value) url += `&username=${encodeURIComponent(activeUserFilter.value)}`
-    const res = await http.get(url)
-    result.value = res
-  } catch (_) {}
-}
-
-onMounted(() => {
-  loadData()
-  window.addEventListener('new-pro:refresh', loadData)
-  // 停留在多维分析页时，每 10 秒静默更新
-  autoRefreshTimer = setInterval(silentRefresh, 10000)
+// 静默自动刷新 (10 秒)
+useAutoRefresh(() => loadData(true), {
+  intervalMs: 10000,
+  onRefreshEvent: () => loadData(false),
 })
 
-onUnmounted(() => {
-  if (autoRefreshTimer) {
-    clearInterval(autoRefreshTimer)
-    autoRefreshTimer = null
-  }
-  window.removeEventListener('new-pro:refresh', loadData)
-})
+loadData()
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- 页面顶栏 -->
+    <!-- 顶部标题与维度切换控制 -->
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
-          <span>多维分析详情</span>
+          <span>多维统计分析</span>
           <Badge variant="outline" class="font-normal text-xs text-muted-foreground">
-            下钻剖析
+            深度钻取
           </Badge>
         </h1>
         <p class="text-xs text-muted-foreground mt-1">
-          全时间跨度支持，穿透分组、用户、渠道、IP、模型进行调用质量与资费下钻
+          按组织分组、终端用户、上游渠道、客户端 IP 与大模型名称进行全量交叉下钻分析
         </p>
       </div>
 
-      <!-- 时间维度切换按钮组 -->
+      <!-- 时间区间切换 -->
       <div class="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-lg border border-border/60 bg-muted/30 p-1">
         <Button
-          v-for="r in timeRanges"
+          v-for="r in TIME_RANGES"
           :key="r.key"
           size="xs"
           variant="ghost"
@@ -238,194 +204,211 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 过滤联动标签栏 (当存在穿透过滤时显示) -->
-    <div v-if="activeModelFilter || activeUserFilter" class="flex items-center gap-2 bg-primary/5 border border-primary/20 rounded-lg p-2.5 text-xs">
-      <Filter class="size-3.5 text-primary shrink-0" />
-      <span class="text-muted-foreground">当前穿透联动约束:</span>
-      <Badge v-if="activeModelFilter" variant="secondary" class="gap-1 font-mono text-[11px] h-5">
-        模型: {{ activeModelFilter }}
-        <X class="size-3 cursor-pointer hover:text-destructive" @click="activeModelFilter = ''; loadData()" />
-      </Badge>
-      <Badge v-if="activeUserFilter" variant="secondary" class="gap-1 font-mono text-[11px] h-5">
-        用户: {{ activeUserFilter }}
-        <X class="size-3 cursor-pointer hover:text-destructive" @click="activeUserFilter = ''; loadData()" />
-      </Badge>
-      <Button variant="ghost" size="xs" class="ml-auto h-5 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer" @click="clearFilters">
-        清空穿透约束
-      </Button>
-    </div>
-
-    <!-- 维度切换 Tab 栏（大按钮卡片式导航） -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+    <!-- 维度标签选择卡片 (5 大核心维度) -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
       <Card
-        v-for="d in dimensions"
-        :key="d.key"
-        class="cursor-pointer border-border/60 transition-all hover:border-primary/50 shadow-xs"
-        :class="currentDim === d.key && 'border-primary ring-2 ring-primary/20 bg-accent/30'"
-        @click="selectDimension(d.key)"
+        v-for="dim in dimensions"
+        :key="dim.key"
+        class="border transition-all cursor-pointer select-none"
+        :class="
+          currentDim === dim.key
+            ? 'border-primary bg-primary/5 shadow-xs'
+            : 'border-border/60 bg-card/60 hover:bg-muted/40 hover:border-border'
+        "
+        @click="selectDimension(dim.key)"
       >
-        <CardContent class="p-3.5 flex items-center gap-3">
+        <CardContent class="p-3 sm:p-4 flex items-center gap-3">
           <div
-            class="size-9 rounded-lg flex items-center justify-center shrink-0"
-            :class="currentDim === d.key ? 'bg-primary text-primary-foreground' : 'bg-muted text-muted-foreground'"
+            class="size-8 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+            :class="currentDim === dim.key ? 'bg-primary text-primary-foreground' : 'bg-muted text-foreground/70'"
           >
-            <component :is="d.icon" class="size-4.5" />
+            <component :is="dim.icon" class="size-4" />
           </div>
-          <div class="min-w-0">
-            <div class="text-xs font-semibold truncate">{{ d.label }}</div>
-            <div class="text-[10px] text-muted-foreground truncate mt-0.5">{{ d.desc }}</div>
+          <div class="min-w-0 flex-1">
+            <div class="text-xs font-semibold truncate" :class="currentDim === dim.key ? 'text-primary' : 'text-foreground'">
+              {{ dim.label }}
+            </div>
+            <div class="text-[10px] text-muted-foreground truncate mt-0.5">
+              {{ dim.desc }}
+            </div>
           </div>
         </CardContent>
       </Card>
     </div>
 
-    <!-- 分析结果卡片表格 -->
+    <!-- 筛选徽标横条 -->
+    <div
+      v-if="activeModelFilter || activeUserFilter"
+      class="flex flex-wrap items-center gap-2 p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs"
+    >
+      <span class="text-muted-foreground flex items-center gap-1 font-medium">
+        <Filter class="size-3.5 text-primary" />
+        当前下钻过滤:
+      </span>
+      <Badge v-if="activeModelFilter" variant="secondary" class="gap-1 font-mono text-xs">
+        模型: {{ activeModelFilter }}
+        <X class="size-3 cursor-pointer hover:text-destructive" @click="activeModelFilter = ''; loadData()" />
+      </Badge>
+      <Badge v-if="activeUserFilter" variant="secondary" class="gap-1 font-mono text-xs">
+        用户: {{ activeUserFilter }}
+        <X class="size-3 cursor-pointer hover:text-destructive" @click="activeUserFilter = ''; loadData()" />
+      </Badge>
+      <Button variant="ghost" size="xs" class="h-6 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer" @click="clearFilters">
+        清空全部过滤
+      </Button>
+    </div>
+
+    <!-- 多维分析表格容器 -->
     <Card class="border-border/60 shadow-xs">
       <CardHeader class="pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <CardTitle class="text-base font-semibold flex items-center gap-2">
-            <span>{{ dimensions.find(d => d.key === currentDim)?.label }} 汇总</span>
-            <Badge variant="secondary" class="font-mono text-xs">
-              {{ filteredAndSortedItems.length }} 条记录
+            <span>{{ dimensions.find(d => d.key === currentDim)?.label }}明细</span>
+            <Badge variant="secondary" class="text-xs font-mono">
+              共 {{ filteredAndSortedItems.length }} 项
             </Badge>
           </CardTitle>
-          <CardDescription class="text-xs">
-            时间范围: {{ result?.timeRange?.label || currentRange }}
-          </CardDescription>
+          <CardDescription class="text-xs">支持任意字段升降序排序、归属地模糊查找与一键导出分析报表</CardDescription>
         </div>
 
-        <!-- 筛选过滤与导出操作 -->
-        <div class="flex items-center gap-2.5">
-          <div class="relative w-48 sm:w-64">
-            <Search class="absolute left-2.5 top-2.5 size-3.5 text-muted-foreground" />
+        <div class="flex items-center gap-2.5 w-full sm:w-auto">
+          <div class="relative flex-1 sm:w-60">
+            <Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               v-model="searchQuery"
-              placeholder="搜索实体名称 / IP..."
-              class="h-8 pl-8 text-xs bg-muted/20"
+              :placeholder="currentDim === 'ip' ? '搜 IP 或归属地...' : '搜索名称/标识...'"
+              class="h-8 pl-8 text-xs placeholder:text-muted-foreground/70"
             />
           </div>
-          <Button variant="outline" size="sm" class="h-8 gap-1.5 text-xs cursor-pointer" @click="exportCsv">
+          <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5 cursor-pointer shrink-0" @click="handleExportCsv">
             <Download class="size-3.5" />
             <span>导出 CSV</span>
           </Button>
         </div>
       </CardHeader>
-
       <CardContent class="p-0">
         <Table>
           <TableHeader>
-            <TableRow class="hover:bg-transparent text-xs">
-              <TableHead class="cursor-pointer select-none" @click="toggleSort('name')">
+            <TableRow class="hover:bg-transparent">
+              <TableHead class="text-xs font-semibold cursor-pointer select-none" @click="toggleSort('name')">
                 <div class="flex items-center gap-1">
-                  <span>目标实体</span>
-                  <ArrowUpDown class="size-3 text-muted-foreground" />
+                  <span>{{ currentDim === 'ip' ? 'IP 地址 / 地理位置' : '标识 / 名称' }}</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right cursor-pointer select-none" @click="toggleSort('totalRequests')">
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('totalRequests')">
                 <div class="flex items-center justify-end gap-1">
-                  <span>总请求量</span>
-                  <ArrowUpDown class="size-3 text-muted-foreground" />
+                  <span>总调用量</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right cursor-pointer select-none" @click="toggleSort('successRate')">
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('successRequests')">
+                <div class="flex items-center justify-end gap-1">
+                  <span>成功</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
+                </div>
+              </TableHead>
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('failedRequests')">
+                <div class="flex items-center justify-end gap-1">
+                  <span>失败</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
+                </div>
+              </TableHead>
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('successRate')">
                 <div class="flex items-center justify-end gap-1">
                   <span>成功率</span>
-                  <ArrowUpDown class="size-3 text-muted-foreground" />
+                  <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right cursor-pointer select-none" @click="toggleSort('costUsd')">
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('costUsd')">
                 <div class="flex items-center justify-end gap-1">
-                  <span>折合费用</span>
-                  <ArrowUpDown class="size-3 text-muted-foreground" />
+                  <span>消耗金额</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right cursor-pointer select-none" @click="toggleSort('totalTokens')">
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('totalTokens')">
                 <div class="flex items-center justify-end gap-1">
-                  <span>Token 消耗</span>
-                  <ArrowUpDown class="size-3 text-muted-foreground" />
+                  <span>总 Token</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right cursor-pointer select-none" @click="toggleSort('avgLatencyMs')">
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('avgLatencyMs')">
                 <div class="flex items-center justify-end gap-1">
-                  <span>平均延迟</span>
-                  <ArrowUpDown class="size-3 text-muted-foreground" />
+                  <span>均耗时</span>
+                  <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right text-xs">活跃时间</TableHead>
+              <TableHead class="text-right text-xs pr-4">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="item in filteredAndSortedItems" :key="item.id" class="hover:bg-muted/40 group">
+            <TableRow v-for="item in filteredAndSortedItems" :key="item.id" class="hover:bg-muted/40">
               <TableCell class="font-medium text-xs">
-                <div class="flex items-center justify-between gap-2 max-w-[260px]">
-                  <div class="flex flex-col min-w-0">
-                    <span class="font-mono text-foreground truncate">{{ item.name }}</span>
-                    <span
-                      v-if="currentDim === 'ip' && item.location"
-                      class="text-[10px] text-muted-foreground truncate flex items-center gap-1 mt-0.5"
-                      :title="item.location"
-                    >
-                      <MapPin class="size-2.5 shrink-0 text-primary/70" />
-                      {{ item.location }}
+                <div class="flex flex-col gap-0.5">
+                  <span class="font-mono text-foreground">{{ item.name }}</span>
+                  <div v-if="currentDim === 'ip'" class="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
+                    <MapPin class="size-3 text-sky-500 shrink-0" />
+                    <span class="truncate max-w-[200px]" :title="item.location || '未知位置'">
+                      {{ item.location || '未知位置' }}
                     </span>
-                  </div>
-                  <!-- 穿透快捷操作小按钮 -->
-                  <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0">
-                    <Button
-                      v-if="currentDim === 'model'"
-                      variant="outline"
-                      size="xs"
-                      class="h-5 px-1.5 text-[10px] cursor-pointer"
-                      @click.stop="drillDownWithFilter('model', item.name, 'user')"
-                      title="查看调用该模型的用户分布"
-                    >
-                      查用户
-                    </Button>
-                    <Button
-                      v-if="currentDim === 'user'"
-                      variant="outline"
-                      size="xs"
-                      class="h-5 px-1.5 text-[10px] cursor-pointer"
-                      @click.stop="drillDownWithFilter('user', item.name, 'model')"
-                      title="查看该用户常用的模型"
-                    >
-                      查模型
-                    </Button>
                   </div>
                 </div>
               </TableCell>
-              <TableCell class="text-right font-mono text-xs">
-                <div>{{ formatNumber(item.totalRequests) }}</div>
-                <div class="text-[10px] text-muted-foreground">
-                  失败 {{ formatNumber(item.failedRequests) }}
-                </div>
+              <TableCell class="text-right font-mono text-xs font-semibold">
+                {{ formatNumber(item.totalRequests) }}
+              </TableCell>
+              <TableCell class="text-right font-mono text-xs text-emerald-600 dark:text-emerald-400">
+                {{ formatNumber(item.successRequests) }}
+              </TableCell>
+              <TableCell class="text-right font-mono text-xs text-rose-500">
+                {{ formatNumber(item.failedRequests) }}
               </TableCell>
               <TableCell class="text-right font-mono text-xs">
                 <Badge
-                  :variant="item.successRate >= 95 ? 'secondary' : item.successRate >= 80 ? 'outline' : 'destructive'"
-                  class="text-[10px] px-1.5 py-0 h-4"
+                  :variant="item.successRate >= 98 ? 'default' : (item.successRate >= 85 ? 'secondary' : 'destructive')"
+                  class="text-[10px] px-1.5 py-0 h-4 font-mono"
+                  :class="item.successRate >= 98 && 'bg-emerald-500 hover:bg-emerald-600 text-white border-transparent'"
                 >
                   {{ item.successRate }}%
                 </Badge>
               </TableCell>
-              <TableCell class="text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                ${{ item.costUsd }}
+              <TableCell class="text-right font-mono text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                ${{ item.costUsd.toFixed(4) }}
               </TableCell>
-              <TableCell class="text-right font-mono text-xs text-muted-foreground">
+              <TableCell class="text-right font-mono text-xs">
                 {{ formatTokens(item.totalTokens) }}
               </TableCell>
               <TableCell class="text-right font-mono text-xs">
-                <span :class="item.avgLatencyMs > 5000 ? 'text-destructive font-semibold' : item.avgLatencyMs > 2000 ? 'text-amber-500' : 'text-foreground'">
-                  {{ item.avgLatencyMs }}ms
-                </span>
+                {{ item.avgLatencyMs }}ms
               </TableCell>
-              <TableCell class="text-right font-mono text-[11px] text-muted-foreground">
-                <div class="truncate max-w-[120px]">{{ item.lastSeen ? item.lastSeen.slice(5) : '-' }}</div>
+              <TableCell class="text-right pr-4">
+                <div class="flex items-center justify-end gap-1">
+                  <Button
+                    v-if="currentDim !== 'model'"
+                    variant="ghost"
+                    size="xs"
+                    class="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="下钻查看该项关联模型"
+                    @click="drillDownWithFilter(currentDim === 'user' ? 'user' : 'model', item.name, 'model')"
+                  >
+                    看模型
+                  </Button>
+                  <Button
+                    v-if="currentDim !== 'channel'"
+                    variant="ghost"
+                    size="xs"
+                    class="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
+                    title="下钻查看该项关联渠道"
+                    @click="drillDownWithFilter(currentDim === 'user' ? 'user' : 'model', item.name, 'channel')"
+                  >
+                    看渠道
+                  </Button>
+                </div>
               </TableCell>
             </TableRow>
             <TableRow v-if="!filteredAndSortedItems.length">
-              <TableCell colspan="7" class="text-center py-8 text-xs text-muted-foreground">
-                {{ loading ? '数据加载中...' : '当前筛选条件与时间维度下未检索到数据' }}
+              <TableCell colspan="9" class="text-center py-10 text-xs text-muted-foreground">
+                所选筛选条件下暂无聚合数据
               </TableCell>
             </TableRow>
           </TableBody>

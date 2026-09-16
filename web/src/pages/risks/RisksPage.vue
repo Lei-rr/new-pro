@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, computed } from 'vue'
 import {
   AlertTriangle,
   ShieldAlert,
@@ -19,29 +19,22 @@ import { http } from '@/shared/api/http'
 import { toast } from '@/shared/lib/toast'
 import { errorMessage } from '@/shared/lib/errors'
 import { copyToClipboard } from '@/shared/lib/utils'
-
-const timeRanges = [
-  { key: 'today', label: '今天(0点)' },
-  { key: '1h', label: '1小时' },
-  { key: '6h', label: '6小时' },
-  { key: '24h', label: '24小时' },
-  { key: '3d', label: '3天内' },
-  { key: '7d', label: '7天内' },
-]
+import { RISK_TIME_RANGES } from '@/shared/constants/time-ranges'
+import { useAutoRefresh } from '@/shared/composables/useAutoRefresh'
 
 const currentRange = ref('today')
 const loading = ref(true)
 const report = ref<any>(null)
 
-async function loadData() {
-  loading.value = true
+async function loadData(silent = false) {
+  if (!silent) loading.value = true
   try {
     const res = await http.get(`/api/analytics/risks?range=${currentRange.value}`)
     report.value = res
   } catch (err) {
-    toast.error(errorMessage(err))
+    if (!silent) toast.error(errorMessage(err))
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -67,30 +60,13 @@ const healthColor = computed(() => {
   return 'text-destructive'
 })
 
-let refreshTimer: any = null
-
-// 静默拉取最新数据（不阻断用户当前操作）
-async function silentRefresh() {
-  try {
-    const data = await http.get(`/api/analytics/risks?range=${currentRange.value}`)
-    report.value = data
-  } catch (_) {}
-}
-
-onMounted(() => {
-  loadData()
-  window.addEventListener('new-pro:refresh', loadData)
-  // 停留在本页面时，每 15 秒静默无感自动更新风险指标
-  refreshTimer = setInterval(silentRefresh, 15000)
+// 静默自动更新 (15 秒)
+useAutoRefresh(() => loadData(true), {
+  intervalMs: 15000,
+  onRefreshEvent: () => loadData(false),
 })
 
-onUnmounted(() => {
-  if (refreshTimer) {
-    clearInterval(refreshTimer)
-    refreshTimer = null
-  }
-  window.removeEventListener('new-pro:refresh', loadData)
-})
+loadData()
 </script>
 
 <template>
@@ -111,7 +87,7 @@ onUnmounted(() => {
 
       <div class="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-lg border border-border/60 bg-muted/30 p-1">
         <Button
-          v-for="r in timeRanges"
+          v-for="r in RISK_TIME_RANGES"
           :key="r.key"
           size="xs"
           variant="ghost"
@@ -124,307 +100,246 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 风险综合态势卡片 -->
+    <!-- 顶栏核心安全健康度卡片 -->
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <!-- 系统健康度评分 -->
-      <Card class="border-border/60 shadow-xs bg-card/70 backdrop-blur-sm">
-        <CardContent class="p-5 flex items-center justify-between">
-          <div>
-            <div class="text-xs text-muted-foreground font-medium">综合健康指数</div>
-            <div class="text-3xl font-extrabold font-mono mt-1" :class="healthColor">
+      <Card class="border-border/60 shadow-xs md:col-span-2">
+        <CardContent class="p-4 sm:p-5 flex items-center justify-between gap-4">
+          <div class="space-y-1">
+            <div class="text-xs text-muted-foreground font-medium flex items-center gap-1.5">
+              <ShieldCheck v-if="healthScore >= 80" class="size-4 text-emerald-500" />
+              <ShieldAlert v-else class="size-4 text-amber-500" />
+              <span>当前系统综合健康评分</span>
+            </div>
+            <div class="text-3xl sm:text-4xl font-extrabold font-mono tracking-tight" :class="healthColor">
               {{ healthScore }}
-              <span class="text-xs font-normal text-muted-foreground">/ 100</span>
+              <span class="text-xs text-muted-foreground font-sans font-normal ml-1">/ 100 分</span>
             </div>
-            <div class="text-[11px] text-muted-foreground mt-1">
-              {{ healthScore >= 85 ? '系统运行平稳健康' : healthScore >= 60 ? '存在部分亚健康风险' : '存在严重安全或故障风险' }}
-            </div>
+            <p class="text-xs text-muted-foreground pt-1">
+              {{ healthScore >= 85 ? '整体运行稳定，未探测到大面积故障或严重攻击' : (healthScore >= 60 ? '存在部分异常抖动，建议关注下方高危列表' : '检测到高危攻击或渠道中断，请尽快处置') }}
+            </p>
           </div>
-          <div class="size-12 rounded-xl bg-primary/5 flex items-center justify-center">
-            <ShieldCheck v-if="healthScore >= 85" class="size-7 text-emerald-500" />
-            <ShieldAlert v-else class="size-7 text-destructive" />
+
+          <div class="flex flex-col items-end gap-1.5 shrink-0">
+            <Badge :variant="healthScore >= 85 ? 'default' : (healthScore >= 60 ? 'secondary' : 'destructive')" class="text-xs px-2 py-0.5 font-medium">
+              {{ healthScore >= 85 ? '健康稳定' : (healthScore >= 60 ? '关注预警' : '高危告警') }}
+            </Badge>
+            <span class="text-[11px] text-muted-foreground font-mono">
+              共触发 {{ report?.summary?.totalAlerts ?? 0 }} 项规则
+            </span>
           </div>
         </CardContent>
       </Card>
 
-      <!-- 严重风险项 -->
       <Card class="border-border/60 shadow-xs">
-        <CardContent class="p-5 flex items-center justify-between">
-          <div>
-            <div class="text-xs text-muted-foreground font-medium">严重 / 紧急警报</div>
-            <div class="text-3xl font-bold font-mono mt-1 text-destructive">
+        <CardHeader class="pb-2">
+          <CardDescription class="text-xs font-medium">阻断 / 异常 IP</CardDescription>
+          <CardTitle class="text-2xl font-bold font-mono tracking-tight text-destructive">
+            {{ report?.summary?.abnormalIpCount ?? 0 }}
+            <span class="text-xs text-muted-foreground font-sans font-normal">个终端</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="text-xs text-muted-foreground">
+          <div class="flex items-center justify-between">
+            <span>高危严重:</span>
+            <span class="font-mono font-medium text-destructive">
               {{ report?.summary?.criticalCount ?? 0 }}
-              <span class="text-xs font-normal text-muted-foreground">项</span>
-            </div>
-            <div class="text-[11px] text-muted-foreground mt-1">
-              高危告警: {{ report?.summary?.highCount ?? 0 }} 项
-            </div>
+            </span>
           </div>
-          <div class="size-10 rounded-lg bg-destructive/10 text-destructive flex items-center justify-center">
-            <AlertTriangle class="size-5" />
-          </div>
-        </CardContent>
-      </Card>
-
-      <!-- 高危 IP 数量 -->
-      <Card class="border-border/60 shadow-xs">
-        <CardContent class="p-5 flex items-center justify-between">
-          <div>
-            <div class="text-xs text-muted-foreground font-medium">检出高危可疑 IP</div>
-            <div class="text-3xl font-bold font-mono mt-1 text-amber-500">
-              {{ report?.highRiskIps?.length ?? 0 }}
-              <span class="text-xs font-normal text-muted-foreground">个</span>
-            </div>
-            <div class="text-[11px] text-muted-foreground mt-1">
-              建议及时加入封禁黑名单
-            </div>
-          </div>
-          <div class="size-10 rounded-lg bg-amber-500/10 text-amber-500 flex items-center justify-center">
-            <Ban class="size-5" />
+          <div class="flex items-center justify-between mt-1">
+            <span>需关注:</span>
+            <span class="font-mono font-medium text-amber-500">
+              {{ report?.summary?.highCount ?? 0 }}
+            </span>
           </div>
         </CardContent>
       </Card>
 
-      <!-- 异常渠道数 -->
       <Card class="border-border/60 shadow-xs">
-        <CardContent class="p-5 flex items-center justify-between">
-          <div>
-            <div class="text-xs text-muted-foreground font-medium">高故障率上游渠道</div>
-            <div class="text-3xl font-bold font-mono mt-1 text-foreground">
-              {{ report?.failingChannels?.length ?? 0 }}
-              <span class="text-xs font-normal text-muted-foreground">个</span>
-            </div>
-            <div class="text-[11px] text-muted-foreground mt-1">
-              错误率高或已发生熔断
-            </div>
+        <CardHeader class="pb-2">
+          <CardDescription class="text-xs font-medium">故障渠道阻断</CardDescription>
+          <CardTitle class="text-2xl font-bold font-mono tracking-tight" :class="(report?.summary?.unhealthyChannelCount ?? 0) > 0 ? 'text-amber-500' : 'text-emerald-600 dark:text-emerald-400'">
+            {{ report?.summary?.unhealthyChannelCount ?? 0 }}
+            <span class="text-xs text-muted-foreground font-sans font-normal">条上游</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent class="text-xs text-muted-foreground">
+          <div class="flex items-center justify-between">
+            <span>中级预警:</span>
+            <span class="font-mono font-medium text-muted-foreground">
+              {{ report?.summary?.mediumCount ?? 0 }}
+            </span>
           </div>
-          <div class="size-10 rounded-lg bg-primary/5 text-primary flex items-center justify-center">
-            <Activity class="size-5" />
+          <div class="flex items-center justify-between mt-1">
+            <span>低风险波动:</span>
+            <span class="font-mono font-medium text-muted-foreground">
+              {{ report?.summary?.lowCount ?? 0 }}
+            </span>
           </div>
         </CardContent>
       </Card>
     </div>
 
-    <!-- 风险预警事件列表 (Alerts Feed) -->
+    <!-- 风险告警事件列表卡片 -->
     <Card class="border-border/60 shadow-xs">
       <CardHeader class="pb-3 flex flex-row items-center justify-between">
         <div>
           <CardTitle class="text-base font-semibold flex items-center gap-2">
-            <span>智能风险预警建议 (AI Analysis & Insights)</span>
-            <Badge variant="secondary" class="font-mono text-xs">
-              {{ report?.alerts?.length ?? 0 }} 项预警
+            <span>当前激活的风险策略告警</span>
+            <Badge variant="secondary" class="text-xs font-mono">
+              {{ report?.alerts?.length ?? 0 }}
             </Badge>
           </CardTitle>
           <CardDescription class="text-xs">
-            由分析引擎根据吞吐模式、失败激增及异常成本特征生成的排查诊断建议
+            由后端风控引擎自动化计算触发的异常特征行为，支持针对性快速处置
           </CardDescription>
         </div>
       </CardHeader>
-
       <CardContent class="p-0">
         <div class="divide-y divide-border/60">
           <div
-            v-for="alert in report?.alerts ?? []"
+            v-for="alert in report?.alerts"
             :key="alert.id"
-            class="p-4 transition-colors hover:bg-muted/30 flex flex-col sm:flex-row sm:items-start gap-4"
+            class="p-4 sm:p-5 flex flex-col sm:flex-row sm:items-start justify-between gap-4 hover:bg-muted/30 transition-colors"
           >
-            <!-- 警报级别徽章 -->
-            <div class="shrink-0 mt-0.5">
-              <Badge
-                :variant="alert.severity === 'critical' ? 'destructive' : alert.severity === 'high' ? 'destructive' : 'outline'"
-                class="text-[11px] px-2"
-              >
-                {{ alert.severity.toUpperCase() }}
-              </Badge>
-            </div>
-
-            <!-- 内容与处置建议 -->
-            <div class="flex-1 space-y-1.5">
-              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1">
-                <div class="font-semibold text-sm text-foreground flex items-center gap-2">
-                  <span>{{ alert.title }}</span>
-                  <Badge variant="secondary" class="text-[10px] font-mono font-normal">
-                    {{ alert.target }}
-                  </Badge>
-                </div>
-                <span class="text-[11px] text-muted-foreground font-mono">
-                  检测值: <strong class="text-foreground">{{ alert.metricValue }}</strong> ({{ alert.threshold }})
+            <div class="space-y-1.5 flex-1 min-w-0">
+              <div class="flex items-center gap-2 flex-wrap">
+                <Badge
+                  :variant="alert.severity === 'critical' ? 'destructive' : (alert.severity === 'high' ? 'secondary' : 'outline')"
+                  class="text-[10px] px-1.5 py-0 h-4 uppercase font-semibold"
+                >
+                  {{ alert.severity }}
+                </Badge>
+                <h3 class="text-sm font-bold text-foreground">
+                  {{ alert.title }}
+                </h3>
+                <span class="text-xs text-muted-foreground font-mono">
+                  目标: {{ alert.target }}
                 </span>
               </div>
-
               <p class="text-xs text-muted-foreground leading-relaxed">
                 {{ alert.description }}
               </p>
-
-              <!-- 治理建议提示条 -->
-              <div class="rounded-md bg-muted/50 border border-border/40 p-2.5 text-xs text-foreground flex items-start gap-2">
-                <Sparkles class="size-4 text-amber-500 shrink-0 mt-0.5" />
-                <div class="leading-relaxed">
-                  <strong class="font-medium">治理建议：</strong>{{ alert.suggestion }}
-                </div>
+              <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs pt-1">
+                <span class="text-muted-foreground">
+                  实际观测值: <span class="font-mono text-foreground font-semibold">{{ alert.metricValue }}</span>
+                </span>
+                <span class="text-muted-foreground">
+                  触发容忍线: <span class="font-mono text-muted-foreground">{{ alert.threshold }}</span>
+                </span>
               </div>
+            </div>
+
+            <!-- 处置指引卡 -->
+            <div class="sm:max-w-xs w-full p-3 rounded-lg bg-muted/40 border border-border/40 text-xs space-y-1.5 shrink-0">
+              <div class="font-semibold text-foreground flex items-center gap-1.5">
+                <Sparkles class="size-3.5 text-amber-500" />
+                <span>处置建议</span>
+              </div>
+              <p class="text-[11px] text-muted-foreground leading-relaxed">
+                {{ alert.suggestion }}
+              </p>
             </div>
           </div>
 
           <div v-if="!report?.alerts?.length" class="p-8 text-center text-xs text-muted-foreground">
-            🎉 当前监控周期内未发现严重风险事件，系统状态极佳！
+            所选时间段内系统运行良好，未触发任何风控拦截规则
           </div>
         </div>
       </CardContent>
     </Card>
 
-    <!-- 下半部分两表：高危 IP 拦截建议 & 高故障率渠道详情 -->
-    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      <!-- 高危 IP 列表 -->
-      <Card class="border-border/60 shadow-xs">
-        <CardHeader class="pb-3 flex flex-row items-center justify-between">
-          <div>
-            <CardTitle class="text-base font-semibold">恶意刷量 / 突发高频 IP 拦截</CardTitle>
-            <CardDescription class="text-xs">
-              自动化识别恶意高频撞库、短时暴增突刺与死循环调用，支持一键排查
-            </CardDescription>
-          </div>
-        </CardHeader>
-        <CardContent class="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow class="hover:bg-transparent">
-                <TableHead class="text-xs">IP 来源与特征</TableHead>
-                <TableHead class="text-center text-xs">风险类别</TableHead>
-                <TableHead class="text-right text-xs">请求总量 / 短时突发</TableHead>
-                <TableHead class="text-right text-xs">失败率</TableHead>
-                <TableHead class="text-right text-xs pr-4">操作</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="ip in report?.highRiskIps ?? []" :key="ip.ip" class="hover:bg-muted/40 group">
-                <TableCell class="text-xs">
-                  <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="font-mono font-semibold text-foreground">{{ ip.ip }}</span>
-                    <Badge v-if="ip.location" variant="outline" class="text-[9px] px-1 py-0 h-3.5 font-normal text-muted-foreground border-muted-foreground/30">
-                      {{ ip.location }}
-                    </Badge>
-                    <Badge v-if="ip.severity === 'critical'" variant="destructive" class="text-[9px] px-1 py-0 h-3.5">
-                      紧急
-                    </Badge>
-                  </div>
-                  <div class="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                    {{ ip.riskReason }}
-                  </div>
-                  <div v-if="ip.modelsUsed?.length" class="text-[10px] text-muted-foreground/80 mt-0.5 font-mono">
-                    涉及模型: {{ ip.modelsUsed.join(', ') }}
-                  </div>
-                </TableCell>
-                <TableCell class="text-center">
-                  <Badge
-                    v-if="ip.riskType === 'brushing'"
-                    class="text-[10px] px-1.5 py-0 h-4 bg-destructive text-destructive-foreground border-transparent"
-                  >
-                    恶意刷接口
-                  </Badge>
-                  <Badge
-                    v-else-if="ip.riskType === 'relay_hijack'"
-                    class="text-[10px] px-1.5 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-400 bg-amber-500/10"
-                    variant="outline"
-                  >
-                    中转站接走
-                  </Badge>
-                  <Badge
-                    v-else-if="ip.riskType === 'massive_volume'"
-                    class="text-[10px] px-1.5 py-0 h-4 border-purple-500/40 text-purple-600 dark:text-purple-400 bg-purple-500/10"
-                    variant="outline"
-                  >
-                    天量请求
-                  </Badge>
-                  <Badge
-                    v-else
-                    variant="secondary"
-                    class="text-[10px] px-1.5 py-0 h-4"
-                  >
-                    高频并发
-                  </Badge>
-                </TableCell>
-                <TableCell class="text-right font-mono text-xs">
-                  <div class="font-semibold">{{ ip.requestCount.toLocaleString() }} 次</div>
-                  <div v-if="ip.costUsd && ip.costUsd >= 10" class="text-[10px] text-purple-600 dark:text-purple-400 font-semibold">
-                    ${{ ip.costUsd.toFixed(2) }}
-                  </div>
-                  <div v-else-if="ip.burst1m" class="text-[10px] text-amber-600 dark:text-amber-400">
-                    1m: +{{ ip.burst1m }} 次
-                  </div>
-                </TableCell>
-                <TableCell class="text-right font-mono text-xs">
-                  <Badge
-                    :variant="ip.failureRate >= 50 ? 'destructive' : 'outline'"
-                    class="text-[10px] px-1.5 py-0 h-4"
-                    :class="ip.failureRate < 50 && 'text-muted-foreground border-border'"
-                  >
-                    {{ ip.failureRate }}%
-                  </Badge>
-                </TableCell>
-                <TableCell class="text-right pr-4">
-                  <Button variant="ghost" size="xs" class="h-7 text-xs cursor-pointer gap-1" @click="handleCopy(ip.ip)">
-                    <Copy class="size-3" />
-                    <span>复制IP</span>
-                  </Button>
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="!report?.highRiskIps?.length">
-                <TableCell colspan="5" class="text-center py-6 text-xs text-muted-foreground">
-                  暂未检测到异常可疑 IP
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <!-- 故障渠道排查 -->
-      <Card class="border-border/60 shadow-xs">
-        <CardHeader class="pb-3">
-          <CardTitle class="text-base font-semibold">不稳定上游渠道追踪</CardTitle>
+    <!-- 高危 IP 追踪与黑名单建议表格 -->
+    <Card class="border-border/60 shadow-xs">
+      <CardHeader class="pb-3 flex flex-row items-center justify-between">
+        <div>
+          <CardTitle class="text-base font-semibold flex items-center gap-2">
+            <span>高危 IP 拦截与封禁建议清单</span>
+            <Badge variant="outline" class="text-xs font-mono">
+              Top {{ report?.highRiskIps?.length ?? 0 }}
+            </Badge>
+          </CardTitle>
           <CardDescription class="text-xs">
-            调用报错率过高或超长超时的上游供应商渠道
+            针对破坏性死循环探测、恶意刷量与高频中转套娃行为，一键复制 IP 并建议拉黑
           </CardDescription>
-        </CardHeader>
-        <CardContent class="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow class="hover:bg-transparent">
-                <TableHead class="text-xs">渠道名称</TableHead>
-                <TableHead class="text-right text-xs">失败数 / 总数</TableHead>
-                <TableHead class="text-right text-xs">失败率</TableHead>
-                <TableHead class="text-right text-xs">平均延迟</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              <TableRow v-for="c in report?.failingChannels ?? []" :key="c.id" class="hover:bg-muted/40">
-                <TableCell class="text-xs">
-                  <div class="font-medium text-foreground">{{ c.name }}</div>
-                  <div class="text-[10px] text-destructive truncate max-w-[200px] mt-0.5">
-                    {{ c.lastErrorMessage }}
-                  </div>
-                </TableCell>
-                <TableCell class="text-right font-mono text-xs">
-                  {{ c.failedRequests }} / {{ c.totalRequests }}
-                </TableCell>
-                <TableCell class="text-right font-mono text-xs">
-                  <Badge variant="destructive" class="text-[10px] px-1.5 py-0 h-4">
-                    {{ c.errorRate }}%
+        </div>
+      </CardHeader>
+      <CardContent class="p-0">
+        <Table>
+          <TableHeader>
+            <TableRow class="hover:bg-transparent">
+              <TableHead class="text-xs font-semibold">IP 地址 / 归属地</TableHead>
+              <TableHead class="text-xs font-semibold">危害特征</TableHead>
+              <TableHead class="text-right text-xs font-semibold">总请求</TableHead>
+              <TableHead class="text-right text-xs font-semibold">失败数</TableHead>
+              <TableHead class="text-right text-xs font-semibold">失败率</TableHead>
+              <TableHead class="text-xs font-semibold">涉及模型</TableHead>
+              <TableHead class="text-xs font-semibold">最近活动</TableHead>
+              <TableHead class="text-right text-xs font-semibold pr-4">操作</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            <TableRow v-for="ipItem in report?.highRiskIps" :key="ipItem.ip" class="hover:bg-muted/40">
+              <TableCell class="font-mono text-xs font-semibold text-foreground">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <span>{{ ipItem.ip }}</span>
+                  <Badge v-if="ipItem.location" variant="outline" class="text-[10px] font-normal px-1 py-0 h-4 border-sky-500/30 text-sky-600 dark:text-sky-400">
+                    {{ ipItem.location }}
                   </Badge>
-                </TableCell>
-                <TableCell class="text-right font-mono text-xs">
-                  {{ c.avgLatency }}ms
-                </TableCell>
-              </TableRow>
-              <TableRow v-if="!report?.failingChannels?.length">
-                <TableCell colspan="4" class="text-center py-6 text-xs text-muted-foreground">
-                  暂无高故障率渠道，上游链路稳定
-                </TableCell>
-              </TableRow>
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-    </div>
+                </div>
+              </TableCell>
+              <TableCell class="text-xs max-w-xs">
+                <div class="flex items-center gap-1.5 flex-wrap">
+                  <Badge
+                    :variant="ipItem.severity === 'critical' ? 'destructive' : 'secondary'"
+                    class="text-[10px] px-1.5 py-0 h-4"
+                  >
+                    {{ ipItem.riskType === 'brushing' ? '恶意死循环' : (ipItem.riskType === 'relay_hijack' ? '中转站套娃' : '单IP天量') }}
+                  </Badge>
+                  <span class="text-muted-foreground text-[11px] truncate" :title="ipItem.riskReason">
+                    {{ ipItem.riskReason }}
+                  </span>
+                </div>
+              </TableCell>
+              <TableCell class="text-right font-mono text-xs font-semibold">
+                {{ ipItem.requestCount }}
+              </TableCell>
+              <TableCell class="text-right font-mono text-xs text-rose-500">
+                {{ ipItem.failedCount }}
+              </TableCell>
+              <TableCell class="text-right font-mono text-xs">
+                <Badge
+                  :variant="ipItem.failureRate >= 70 ? 'destructive' : (ipItem.failureRate >= 40 ? 'secondary' : 'outline')"
+                  class="text-[10px] px-1.5 py-0 h-4 font-mono"
+                >
+                  {{ ipItem.failureRate }}%
+                </Badge>
+              </TableCell>
+              <TableCell class="text-xs text-muted-foreground font-mono truncate max-w-[120px]">
+                {{ ipItem.modelsUsed?.join(', ') || '-' }}
+              </TableCell>
+              <TableCell class="text-xs text-muted-foreground whitespace-nowrap">
+                {{ ipItem.lastSeen }}
+              </TableCell>
+              <TableCell class="text-right pr-4">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  class="h-6 text-xs gap-1 cursor-pointer text-destructive hover:bg-destructive/10 border-destructive/30"
+                  @click="handleCopy(ipItem.ip)"
+                >
+                  <Ban class="size-3" />
+                  <span>复制拉黑</span>
+                </Button>
+              </TableCell>
+            </TableRow>
+            <TableRow v-if="!report?.highRiskIps?.length">
+              <TableCell colspan="8" class="text-center py-8 text-xs text-muted-foreground">
+                所选时段内无异常高危 IP 终端
+              </TableCell>
+            </TableRow>
+          </TableBody>
+        </Table>
+      </CardContent>
+    </Card>
   </div>
 </template>

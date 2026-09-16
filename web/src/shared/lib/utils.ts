@@ -34,6 +34,13 @@ export function formatNumber(num: number = 0): string {
 }
 
 /**
+ * 转换 NewAPI 500000 配额为美金金额显示 ($0.0000)
+ */
+export function formatQuotaUsd(quota: number = 0): string {
+  return `$${Number((quota / 500000).toFixed(4))}`
+}
+
+/**
  * 兼容 HTTP 与 HTTPS 各种安全上下文的强健剪贴板写入工具
  */
 export async function copyToClipboard(text: string): Promise<boolean> {
