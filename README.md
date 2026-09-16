@@ -64,7 +64,7 @@ DATABASE_URL=postgresql://root:your_db_password@new-api-postgres:5432/new-api
 
 # 控制台管理员账号密码与会话密钥
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD_HASH=admin123
+ADMIN_PASSWORD=admin123
 JWT_SECRET=your_jwt_secret_random_key_change_me
 
 # 实时推流与宏观校准周期 (秒)
@@ -112,7 +112,7 @@ docker compose up -d
 | :--- | :---: | :--- | :--- |
 | `DATABASE_URL` | **是** | - | NewAPI 对应的 PostgreSQL 数据库连接地址 |
 | `ADMIN_USERNAME` | 否 | `admin` | 大屏控制台管理员登录用户名 |
-| `ADMIN_PASSWORD_HASH` | 否 | `admin123` | 大屏控制台管理员登录密码 |
+| `ADMIN_PASSWORD` | 否 | `admin123` | 大屏控制台管理员登录密码 |
 | `JWT_SECRET` | 否 | `new-pro-secret...` | 会话签名密钥（建议生产环境配置随机字符串） |
 | `PORT` | 否 | `3033` | 后端服务监听端口 |
 | `HOST` | 否 | `0.0.0.0` | 后端服务监听地址 |

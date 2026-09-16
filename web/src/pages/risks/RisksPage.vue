@@ -29,7 +29,7 @@ const timeRanges = [
   { key: '7d', label: '7天内' },
 ]
 
-const currentRange = ref('24h')
+const currentRange = ref('today')
 const loading = ref(true)
 const report = ref<any>(null)
 
