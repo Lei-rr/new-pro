@@ -10,6 +10,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Activity, ShieldCheck, Zap } from '@lucide/vue'
 import { toast } from '@/shared/lib/toast'
 import { errorMessage } from '@/shared/lib/errors'
+import { APP_VERSION } from '@/shared/constants/version'
 
 const router = useRouter()
 const session = useSessionStore()
@@ -48,7 +49,7 @@ async function submit() {
           </div>
           <div class="flex items-center gap-2 mt-1">
             <h1 class="text-2xl font-bold tracking-tight text-foreground font-sans">New-Pro</h1>
-            <Badge variant="outline" class="text-[11px] font-mono font-medium px-2 py-0.5 h-5">v1.0.0</Badge>
+            <Badge variant="outline" class="text-[11px] font-mono font-medium px-2 py-0.5 h-5">v{{ APP_VERSION }}</Badge>
           </div>
           <p class="text-xs text-muted-foreground font-medium">
             多维实时监控与运行态势分析系统

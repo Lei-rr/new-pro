@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify'
 import { loadConfig } from '../config.js'
 import { checkDbConnection } from '../db.js'
 import { safeCompare } from '../middlewares/auth.middleware.js'
+import { getAppVersion } from '../version.js'
 
 export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void> {
   const config = loadConfig()
@@ -26,7 +27,7 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
         data: {
           username: config.adminUsername,
           token: config.jwtSecret,
-          version: '1.1.1',
+          version: getAppVersion(),
         },
       }
     }
@@ -52,7 +53,7 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
         authenticated,
         username: authenticated ? config.adminUsername : null,
         dbConnected: dbOk,
-        version: '1.0.0',
+        version: getAppVersion(),
         pulseIntervalSec: config.pulseIntervalSec,
         calibrationIntervalSec: config.calibrationIntervalSec,
       },

@@ -1,6 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { http } from '@/shared/api/http'
+import { APP_VERSION } from '@/shared/constants/version'
 
 export interface SessionInfo {
   authenticated: boolean
@@ -15,7 +16,7 @@ export const useSessionStore = defineStore('session', () => {
   const authenticated = ref(false)
   const username = ref<string | null>(null)
   const dbConnected = ref(false)
-  const version = ref('1.0.0')
+  const version = ref(APP_VERSION)
   const pulseIntervalSec = ref(5)
   const calibrationIntervalSec = ref(60)
   const loaded = ref(false)

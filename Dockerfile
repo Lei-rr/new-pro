@@ -42,9 +42,10 @@ RUN corepack enable && corepack prepare pnpm@latest --activate
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN pnpm install --prod --frozen-lockfile --ignore-scripts
 
-# 从 builder 复制打包产物
+# 从 builder 复制打包产物与版本定义
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/web/dist ./web/dist
+COPY --from=builder /app/VERSION ./VERSION
 
 EXPOSE 3033
 

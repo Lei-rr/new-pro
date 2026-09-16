@@ -22,6 +22,7 @@ import { http } from '@/shared/api/http'
 import { useRealtimePulse } from '@/shared/api/websocket'
 import { toast } from '@/shared/lib/toast'
 import { cn, formatTokens } from '@/shared/lib/utils'
+import { APP_VERSION } from '@/shared/constants/version'
 
 const router = useRouter()
 const route = useRoute()
@@ -311,27 +312,33 @@ onUnmounted(() => {
     </main>
 
     <!-- 页脚状态条 (优化移动端自适应排版与紧凑展示) -->
-    <footer class="mt-auto border-t border-border/40 py-3.5 sm:py-4 text-xs text-muted-foreground bg-muted/10">
+    <footer class="mt-auto border-t border-border/40 py-3 text-xs text-muted-foreground bg-muted/10">
       <div class="mx-auto flex w-full max-w-7xl flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4 px-4 sm:px-6 lg:px-8">
         <div class="flex items-center gap-2">
           <span class="font-semibold text-foreground tracking-tight">New-Pro</span>
-          <Badge variant="outline" class="h-4.5 px-1.5 text-[10px] font-mono">v1.0.0</Badge>
+          <Badge variant="outline" class="h-4.5 px-1.5 text-[10px] font-mono">v{{ APP_VERSION }}</Badge>
           <span class="hidden sm:inline text-border">|</span>
           <span class="text-[11px] text-muted-foreground/80">高性能实时监控</span>
         </div>
-        <div class="flex flex-wrap items-center justify-center gap-x-4 gap-y-1.5 text-[11px]">
-          <span class="flex items-center gap-1.5">
+        <div class="flex flex-wrap items-center justify-center gap-3 text-xs">
+          <!-- WebSocket 状态胶囊 -->
+          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/60 text-[11px] shadow-2xs">
             <span
-              class="size-1.5 rounded-full transition-colors shrink-0"
-              :class="pulse.wsConnected ? 'bg-emerald-500 animate-pulse' : 'bg-amber-500'"
+              class="size-2 rounded-full transition-all shrink-0"
+              :class="pulse.wsConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse' : 'bg-amber-500'"
             />
-            <span class="text-muted-foreground">{{ pulse.wsConnected ? 'WebSocket 已直连' : 'WS 正在连接...' }}</span>
-          </span>
-          <span class="flex items-center gap-1.5">
-            <Database class="size-3.5 text-emerald-500 shrink-0" />
+            <span class="text-muted-foreground">WebSocket:</span>
+            <span :class="pulse.wsConnected ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-amber-500 font-medium'">
+              {{ pulse.wsConnected ? '已直连' : '连接中...' }}
+            </span>
+          </div>
+
+          <!-- PostgreSQL 状态胶囊 -->
+          <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/60 text-[11px] shadow-2xs">
+            <Database class="size-3 text-emerald-500 shrink-0" />
             <span class="text-muted-foreground">PostgreSQL:</span>
             <span class="text-emerald-600 dark:text-emerald-400 font-medium">正常通信</span>
-          </span>
+          </div>
         </div>
       </div>
     </footer>
