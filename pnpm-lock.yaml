@@ -41,6 +41,9 @@ importers:
       fastify-plugin:
         specifier: ^5.1.0
         version: 5.1.0
+      ip2region:
+        specifier: ^2.3.0
+        version: 2.3.0(@types/node@22.20.1)
       pg:
         specifier: ^8.13.3
         version: 8.23.0
@@ -1076,6 +1079,11 @@ packages:
   ip-address@10.7.0:
     resolution: {integrity: sha512-BGFsyJd5mpXp3rK6jIdADLNgpJUK1jnjzvYF8lK+VyDab9JAmqN0YOKDdP17HlgKb2+ehPgDc8EtnRLbGCAMhA==}
     engines: {node: '>= 12'}
+
+  ip2region@2.3.0:
+    resolution: {integrity: sha512-zV5Xsadzrx9Ej6heoyhbXMsfGWWQ3C6bAIYStrHhw9kzLpGpVNlnAyRBxxPgxA1GNqr1Ti7oUxcWsMWNN3jZBg==}
+    peerDependencies:
+      '@types/node': '*'
 
   ipaddr.js@2.5.0:
     resolution: {integrity: sha512-aq+t5NAc+cS6rZQQVWC2x98CPqGtKKTMDd4Gaodv0wShnItdKg/51djkGJ1hqH+Oy0ivDftCbSLCQob8zso01w==}
@@ -2381,6 +2389,10 @@ snapshots:
   inherits@2.0.4: {}
 
   ip-address@10.7.0: {}
+
+  ip2region@2.3.0(@types/node@22.20.1):
+    dependencies:
+      '@types/node': 22.20.1
 
   ipaddr.js@2.5.0: {}
 

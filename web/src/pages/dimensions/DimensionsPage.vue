@@ -12,6 +12,7 @@ import {
   Search,
   Filter,
   X,
+  MapPin,
 } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
@@ -112,7 +113,9 @@ const filteredAndSortedItems = computed(() => {
   if (searchQuery.value.trim()) {
     const q = searchQuery.value.trim().toLowerCase()
     items = items.filter((it: any) =>
-      it.name.toLowerCase().includes(q) || it.id.toLowerCase().includes(q)
+      it.name.toLowerCase().includes(q) ||
+      it.id.toLowerCase().includes(q) ||
+      (it.location && it.location.toLowerCase().includes(q))
     )
   }
 
@@ -130,19 +133,40 @@ const filteredAndSortedItems = computed(() => {
 
 function exportCsv() {
   if (!filteredAndSortedItems.value.length) return
-  const headers = ['名称', '总请求', '成功数', '失败数', '成功率%', '消耗金额($)', '总Token', '平均耗时(ms)', '首次出现', '最近活跃']
-  const rows = filteredAndSortedItems.value.map((i: any) => [
-    `"${i.name}"`,
-    i.totalRequests,
-    i.successRequests,
-    i.failedRequests,
-    i.successRate,
-    i.costUsd,
-    i.totalTokens,
-    i.avgLatencyMs,
-    `"${i.firstSeen || ''}"`,
-    `"${i.lastSeen || ''}"`,
-  ])
+  const isIp = currentDim.value === 'ip'
+  const headers = isIp
+    ? ['IP地址', '归属地', '总请求', '成功数', '失败数', '成功率%', '消耗金额($)', '总Token', '平均耗时(ms)', '首次出现', '最近活跃']
+    : ['名称', '总请求', '成功数', '失败数', '成功率%', '消耗金额($)', '总Token', '平均耗时(ms)', '首次出现', '最近活跃']
+
+  const rows = filteredAndSortedItems.value.map((i: any) => {
+    if (isIp) {
+      return [
+        `"${i.name}"`,
+        `"${i.location || '-'}"`,
+        i.totalRequests,
+        i.successRequests,
+        i.failedRequests,
+        i.successRate,
+        i.costUsd,
+        i.totalTokens,
+        i.avgLatencyMs,
+        `"${i.firstSeen || ''}"`,
+        `"${i.lastSeen || ''}"`,
+      ]
+    }
+    return [
+      `"${i.name}"`,
+      i.totalRequests,
+      i.successRequests,
+      i.failedRequests,
+      i.successRate,
+      i.costUsd,
+      i.totalTokens,
+      i.avgLatencyMs,
+      `"${i.firstSeen || ''}"`,
+      `"${i.lastSeen || ''}"`,
+    ]
+  })
   const csvContent = '\uFEFF' + [headers.join(','), ...rows.map(r => r.join(','))].join('\n')
   const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
@@ -333,8 +357,18 @@ onUnmounted(() => {
           <TableBody>
             <TableRow v-for="item in filteredAndSortedItems" :key="item.id" class="hover:bg-muted/40 group">
               <TableCell class="font-medium text-xs">
-                <div class="flex items-center justify-between gap-2 max-w-[240px]">
-                  <span class="font-mono text-foreground truncate">{{ item.name }}</span>
+                <div class="flex items-center justify-between gap-2 max-w-[260px]">
+                  <div class="flex flex-col min-w-0">
+                    <span class="font-mono text-foreground truncate">{{ item.name }}</span>
+                    <span
+                      v-if="currentDim === 'ip' && item.location"
+                      class="text-[10px] text-muted-foreground truncate flex items-center gap-1 mt-0.5"
+                      :title="item.location"
+                    >
+                      <MapPin class="size-2.5 shrink-0 text-primary/70" />
+                      {{ item.location }}
+                    </span>
+                  </div>
                   <!-- 穿透快捷操作小按钮 -->
                   <div class="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition-opacity shrink-0">
                     <Button

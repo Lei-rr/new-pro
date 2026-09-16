@@ -298,8 +298,11 @@ onUnmounted(() => {
             <TableBody>
               <TableRow v-for="ip in report?.highRiskIps ?? []" :key="ip.ip" class="hover:bg-muted/40 group">
                 <TableCell class="text-xs">
-                  <div class="flex items-center gap-1.5">
+                  <div class="flex items-center gap-1.5 flex-wrap">
                     <span class="font-mono font-semibold text-foreground">{{ ip.ip }}</span>
+                    <Badge v-if="ip.location" variant="outline" class="text-[9px] px-1 py-0 h-3.5 font-normal text-muted-foreground border-muted-foreground/30">
+                      {{ ip.location }}
+                    </Badge>
                     <Badge v-if="ip.severity === 'critical'" variant="destructive" class="text-[9px] px-1 py-0 h-3.5">
                       紧急
                     </Badge>

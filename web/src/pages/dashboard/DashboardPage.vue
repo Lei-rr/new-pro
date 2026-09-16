@@ -177,7 +177,8 @@ function toggleStreamPause() {
 }
 
 async function copyLogDetail(log: any) {
-  const text = `[NewAPI 日志] 时间: ${log.createdAt} | 模型: ${log.model} | 渠道: ${log.channelName} | 用户: ${log.username} | IP: ${log.ip} | Token: ${log.totalTokens} | 耗时: ${log.useTime}ms | 状态: ${log.status}`
+  const ipText = log.ip ? (log.ipLocation ? `${log.ip} (${log.ipLocation})` : log.ip) : '-'
+  const text = `[NewAPI 日志] 时间: ${log.createdAt} | 模型: ${log.model} | 渠道: ${log.channelName} | 用户: ${log.username} | IP: ${ipText} | Token: ${log.totalTokens} | 耗时: ${log.useTime}ms | 状态: ${log.status}`
   const ok = await copyToClipboard(text)
   if (ok) {
     toast.success('日志详情已复制')
@@ -790,7 +791,7 @@ onUnmounted(() => {
               <TableHead class="text-xs">模型</TableHead>
               <TableHead class="text-xs">渠道</TableHead>
               <TableHead class="text-xs">用户</TableHead>
-              <TableHead class="text-xs">IP 地址</TableHead>
+              <TableHead class="text-xs">IP / 归属地</TableHead>
               <TableHead class="text-right text-xs">Token</TableHead>
               <TableHead class="text-right text-xs">耗时</TableHead>
               <TableHead class="text-center text-xs">状态</TableHead>
@@ -803,7 +804,12 @@ onUnmounted(() => {
               <TableCell class="font-mono text-xs font-medium">{{ log.model }}</TableCell>
               <TableCell class="text-xs text-muted-foreground truncate max-w-[120px]">{{ log.channelName }}</TableCell>
               <TableCell class="text-xs">{{ log.username }}</TableCell>
-              <TableCell class="font-mono text-[11px] text-muted-foreground">{{ log.ip }}</TableCell>
+              <TableCell class="font-mono text-[11px] text-muted-foreground">
+                <div class="text-foreground">{{ log.ip || '-' }}</div>
+                <div v-if="log.ipLocation" class="text-[10px] text-muted-foreground truncate max-w-[130px]" :title="log.ipLocation">
+                  {{ log.ipLocation }}
+                </div>
+              </TableCell>
               <TableCell class="text-right font-mono text-xs">{{ formatTokens(log.totalTokens) }}</TableCell>
               <TableCell class="text-right font-mono text-xs">{{ log.useTime }}ms</TableCell>
               <TableCell class="text-center">

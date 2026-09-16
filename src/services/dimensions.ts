@@ -1,12 +1,14 @@
 import { getDb } from '../db.js'
 import { parseTimeRange, type TimeRangeKey } from './time-ranges.js'
 import { memoryCache } from './cache.js'
+import { getIpLocation } from './geoip.js'
 
 export type DimensionType = 'group' | 'user' | 'channel' | 'ip' | 'model'
 
 export interface DimensionItem {
   id: string
   name: string
+  location?: string
   totalRequests: number
   successRequests: number
   failedRequests: number
@@ -122,33 +124,43 @@ export async function getDimensionAnalysis(
 
   const res = await db.query(querySql)
 
-  const items: DimensionItem[] = res.rows.map((r: any) => {
-    const total = Number(r.total_requests || 0)
-    const success = Number(r.success_requests || 0)
-    const failed = Number(r.failed_requests || 0)
-    const quota = Number(r.total_quota || 0)
-    const promptTokens = Number(r.prompt_tokens || 0)
-    const completionTokens = Number(r.completion_tokens || 0)
-    const avgLatency = Number(r.avg_latency || 0)
-    const successRate = total > 0 ? Number(((success / total) * 100).toFixed(2)) : 100
+  const items: DimensionItem[] = await Promise.all(
+    res.rows.map(async (r: any) => {
+      const total = Number(r.total_requests || 0)
+      const success = Number(r.success_requests || 0)
+      const failed = Number(r.failed_requests || 0)
+      const quota = Number(r.total_quota || 0)
+      const promptTokens = Number(r.prompt_tokens || 0)
+      const completionTokens = Number(r.completion_tokens || 0)
+      const avgLatency = Number(r.avg_latency || 0)
+      const successRate = total > 0 ? Number(((success / total) * 100).toFixed(2)) : 100
+      const entityId = String(r.entity_id)
 
-    return {
-      id: String(r.entity_id),
-      name: String(r.entity_name),
-      totalRequests: total,
-      successRequests: success,
-      failedRequests: failed,
-      successRate,
-      totalQuota: quota,
-      costUsd: Number((quota / 500000).toFixed(4)),
-      promptTokens,
-      completionTokens,
-      totalTokens: promptTokens + completionTokens,
-      avgLatencyMs: avgLatency,
-      firstSeen: r.first_seen,
-      lastSeen: r.last_seen,
-    }
-  })
+      // 若当前维度是 IP，则通过双层缓存引擎异步解析归属地
+      let location: string | undefined
+      if (dimension === 'ip') {
+        location = await getIpLocation(entityId)
+      }
+
+      return {
+        id: entityId,
+        name: String(r.entity_name),
+        location,
+        totalRequests: total,
+        successRequests: success,
+        failedRequests: failed,
+        successRate,
+        totalQuota: quota,
+        costUsd: Number((quota / 500000).toFixed(4)),
+        promptTokens,
+        completionTokens,
+        totalTokens: promptTokens + completionTokens,
+        avgLatencyMs: avgLatency,
+        firstSeen: r.first_seen,
+        lastSeen: r.last_seen,
+      }
+    })
+  )
 
   const result: DimensionAnalysisResult = {
     dimension,

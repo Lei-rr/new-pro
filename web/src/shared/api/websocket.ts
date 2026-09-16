@@ -10,6 +10,7 @@ export interface RealtimePulseData {
   last1mRequests: number
   last5mRequests: number
   activeIps1m: number
+  activeIps30m?: number
   activeUsers1m: number
   avgLatency1m: number
   successRate1m: number
@@ -21,10 +22,15 @@ export interface RealtimePulseData {
     channelName: string
     username: string
     ip: string
+    ipLocation?: string
     quota: number
+    promptTokens?: number
+    completionTokens?: number
     totalTokens: number
     useTime: number
     status: string
+    errorCode?: string
+    errorDetail?: string
   }>
 }
 

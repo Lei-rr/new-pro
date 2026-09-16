@@ -1,6 +1,7 @@
 import { getDb } from '../db.js'
 import { parseTimeRange, type TimeRangeKey } from './time-ranges.js'
 import { memoryCache } from './cache.js'
+import { getIpLocation } from './geoip.js'
 
 export type RiskSeverity = 'critical' | 'high' | 'medium' | 'low'
 
@@ -20,6 +21,7 @@ export interface RiskAlert {
 
 export interface HighRiskIpItem {
   ip: string
+  location?: string
   requestCount: number
   failedCount: number
   failureRate: number
@@ -244,6 +246,7 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
 
       highRiskIps.push({
         ip,
+        location: await getIpLocation(ip),
         requestCount: burst5m,
         failedCount: failed5m,
         failureRate: Number(failRate5m.toFixed(1)),
@@ -325,6 +328,7 @@ export async function detectSystemRisks(rangeKey: TimeRangeKey = '24h'): Promise
         recordedIps.add(ip)
         highRiskIps.push({
           ip,
+          location: await getIpLocation(ip),
           requestCount: total,
           failedCount: failed,
           failureRate,

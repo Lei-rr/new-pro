@@ -1,6 +1,7 @@
 import { getDb } from '../db.js'
 import { parseTimeRange, type TimeRangeKey } from './time-ranges.js'
 import { memoryCache } from './cache.js'
+import { getIpLocation } from './geoip.js'
 
 export interface OverviewMetrics {
   timeRange: {
@@ -69,6 +70,7 @@ export interface OverviewMetrics {
   }>
   topIps: Array<{
     ip: string
+    location?: string
     count: number
     tokens: number
     quota: number
@@ -578,17 +580,21 @@ export async function getDashboardOverview(rangeKey: TimeRangeKey = 'today'): Pr
         timeoutPct: total > 0 ? Number(((timeoutCount / total) * 100).toFixed(1)) : 0,
       }
     })(),
-    topIps: topIpsRes.rows.map((r: any) => {
-      const q = Number(r.quota || 0)
-      return {
-        ip: String(r.ip),
-        count: Number(r.count || 0),
-        tokens: Number(r.tokens || 0),
-        quota: q,
-        costUsd: Number((q / 500000).toFixed(4)),
-        failed: Number(r.failed || 0),
-      }
-    }),
+    topIps: await Promise.all(
+      topIpsRes.rows.map(async (r: any) => {
+        const q = Number(r.quota || 0)
+        const ipStr = String(r.ip)
+        return {
+          ip: ipStr,
+          location: await getIpLocation(ipStr),
+          count: Number(r.count || 0),
+          tokens: Number(r.tokens || 0),
+          quota: q,
+          costUsd: Number((q / 500000).toFixed(4)),
+          failed: Number(r.failed || 0),
+        }
+      })
+    ),
     knownIpList: activeIpsListRes.rows.map((r: any) => String(r.ip)),
   }
 

@@ -1,4 +1,5 @@
 import { getDb } from '../db.js'
+import { getIpLocation } from './geoip.js'
 
 export interface RealtimePulse {
   timestamp: number
@@ -23,6 +24,7 @@ export interface RealtimePulse {
     channelName: string
     username: string
     ip: string
+    ipLocation?: string
     quota: number
     promptTokens: number
     completionTokens: number
@@ -119,46 +121,52 @@ export async function getRealtimePulse(): Promise<RealtimePulse> {
     activeUsers1m: users1m,
     avgLatency1m,
     successRate1m,
-    recentLogs: logsRes.rows.map((r: any) => {
-      const logType = Number(r.type)
-      const content = String(r.content || '')
-      let errorCode = ''
-      if (logType === 5) {
-        const match = content.match(/status_code=(\d{3})/)
-        if (match) {
-          errorCode = match[1]
-        } else if (content.includes('429')) {
-          errorCode = '429'
-        } else if (content.includes('500')) {
-          errorCode = '500'
-        } else if (content.includes('502')) {
-          errorCode = '502'
-        } else if (content.includes('503')) {
-          errorCode = '503'
-        } else if (content.includes('400')) {
-          errorCode = '400'
-        } else {
-          errorCode = 'ERR'
+    recentLogs: await Promise.all(
+      logsRes.rows.map(async (r: any) => {
+        const logType = Number(r.type)
+        const content = String(r.content || '')
+        const ipStr = String(r.ip || '')
+        let errorCode = ''
+        if (logType === 5) {
+          const match = content.match(/status_code=(\d{3})/)
+          if (match) {
+            errorCode = match[1]
+          } else if (content.includes('429')) {
+            errorCode = '429'
+          } else if (content.includes('500')) {
+            errorCode = '500'
+          } else if (content.includes('502')) {
+            errorCode = '502'
+          } else if (content.includes('503')) {
+            errorCode = '503'
+          } else if (content.includes('400')) {
+            errorCode = '400'
+          } else {
+            errorCode = 'ERR'
+          }
         }
-      }
 
-      return {
-        id: Number(r.id),
-        createdAt: new Date(Number(r.created_at) * 1000).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }),
-        type: logType,
-        model: String(r.model),
-        channelName: String(r.channel_name),
-        username: String(r.username),
-        ip: String(r.ip),
-        quota: Number(r.quota || 0),
-        promptTokens: Number(r.prompt_tokens || 0),
-        completionTokens: Number(r.completion_tokens || 0),
-        totalTokens: Number(r.total_tokens || 0),
-        useTime: Number(r.use_time || 0),
-        status: logType === 2 ? 'success' : (logType === 5 ? 'failed' : 'other'),
-        errorCode: errorCode || undefined,
-        errorDetail: content || undefined,
-      }
-    }),
+        const ipLocation = ipStr && ipStr !== '-' ? await getIpLocation(ipStr) : undefined
+
+        return {
+          id: Number(r.id),
+          createdAt: new Date(Number(r.created_at) * 1000).toLocaleTimeString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }),
+          type: logType,
+          model: String(r.model),
+          channelName: String(r.channel_name),
+          username: String(r.username),
+          ip: ipStr,
+          ipLocation,
+          quota: Number(r.quota || 0),
+          promptTokens: Number(r.prompt_tokens || 0),
+          completionTokens: Number(r.completion_tokens || 0),
+          totalTokens: Number(r.total_tokens || 0),
+          useTime: Number(r.use_time || 0),
+          status: logType === 2 ? 'success' : (logType === 5 ? 'failed' : 'other'),
+          errorCode: errorCode || undefined,
+          errorDetail: content || undefined,
+        }
+      })
+    ),
   }
 }
