@@ -10,8 +10,6 @@ import {
   ArrowUpDown,
   Download,
   Search,
-  Filter,
-  X,
   MapPin,
 } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
@@ -41,8 +39,6 @@ const dimensions = [
 
 const currentDim = ref<DimensionType>((route.query.dimension as DimensionType) || 'group')
 const currentRange = ref((route.query.range as string) || 'today')
-const activeModelFilter = ref((route.query.model as string) || '')
-const activeUserFilter = ref((route.query.username as string) || '')
 const searchQuery = ref('')
 const sortField = ref('totalRequests')
 const sortAsc = ref(false)
@@ -52,10 +48,7 @@ const result = ref<any>(null)
 async function loadData(silent = false) {
   if (!silent) loading.value = true
   try {
-    let url = `/api/analytics/dimensions?dimension=${currentDim.value}&range=${currentRange.value}&limit=100`
-    if (activeModelFilter.value) url += `&model=${encodeURIComponent(activeModelFilter.value)}`
-    if (activeUserFilter.value) url += `&username=${encodeURIComponent(activeUserFilter.value)}`
-
+    const url = `/api/analytics/dimensions?dimension=${currentDim.value}&range=${currentRange.value}&limit=100`
     const res = await http.get(url)
     result.value = res
   } catch (err) {
@@ -63,19 +56,6 @@ async function loadData(silent = false) {
   } finally {
     if (!silent) loading.value = false
   }
-}
-
-function drillDownWithFilter(type: 'model' | 'user', value: string, targetDim: DimensionType) {
-  if (type === 'model') activeModelFilter.value = value
-  if (type === 'user') activeUserFilter.value = value
-  currentDim.value = targetDim
-  loadData()
-}
-
-function clearFilters() {
-  activeModelFilter.value = ''
-  activeUserFilter.value = ''
-  loadData()
 }
 
 function selectDimension(dim: DimensionType) {
@@ -236,28 +216,6 @@ loadData()
       </Card>
     </div>
 
-    <!-- 筛选徽标横条 -->
-    <div
-      v-if="activeModelFilter || activeUserFilter"
-      class="flex flex-wrap items-center gap-2 p-2.5 rounded-lg bg-primary/10 border border-primary/20 text-xs"
-    >
-      <span class="text-muted-foreground flex items-center gap-1 font-medium">
-        <Filter class="size-3.5 text-primary" />
-        当前下钻过滤:
-      </span>
-      <Badge v-if="activeModelFilter" variant="secondary" class="gap-1 font-mono text-xs">
-        模型: {{ activeModelFilter }}
-        <X class="size-3 cursor-pointer hover:text-destructive" @click="activeModelFilter = ''; loadData()" />
-      </Badge>
-      <Badge v-if="activeUserFilter" variant="secondary" class="gap-1 font-mono text-xs">
-        用户: {{ activeUserFilter }}
-        <X class="size-3 cursor-pointer hover:text-destructive" @click="activeUserFilter = ''; loadData()" />
-      </Badge>
-      <Button variant="ghost" size="xs" class="h-6 text-[11px] text-muted-foreground hover:text-foreground cursor-pointer" @click="clearFilters">
-        清空全部过滤
-      </Button>
-    </div>
-
     <!-- 多维分析表格容器 -->
     <Card class="border-border/60 shadow-xs">
       <CardHeader class="pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
@@ -332,13 +290,12 @@ loadData()
                   <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('avgLatencyMs')">
+              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none pr-4" @click="toggleSort('avgLatencyMs')">
                 <div class="flex items-center justify-end gap-1">
                   <span>均耗时</span>
                   <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right text-xs pr-4">操作</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -378,36 +335,12 @@ loadData()
               <TableCell class="text-right font-mono text-xs">
                 {{ formatTokens(item.totalTokens) }}
               </TableCell>
-              <TableCell class="text-right font-mono text-xs">
+              <TableCell class="text-right font-mono text-xs pr-4">
                 {{ item.avgLatencyMs }}ms
-              </TableCell>
-              <TableCell class="text-right pr-4">
-                <div class="flex items-center justify-end gap-1">
-                  <Button
-                    v-if="currentDim !== 'model'"
-                    variant="ghost"
-                    size="xs"
-                    class="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
-                    title="下钻查看该项关联模型"
-                    @click="drillDownWithFilter(currentDim === 'user' ? 'user' : 'model', item.name, 'model')"
-                  >
-                    看模型
-                  </Button>
-                  <Button
-                    v-if="currentDim !== 'channel'"
-                    variant="ghost"
-                    size="xs"
-                    class="h-6 px-1.5 text-[10px] text-muted-foreground hover:text-foreground cursor-pointer"
-                    title="下钻查看该项关联渠道"
-                    @click="drillDownWithFilter(currentDim === 'user' ? 'user' : 'model', item.name, 'channel')"
-                  >
-                    看渠道
-                  </Button>
-                </div>
               </TableCell>
             </TableRow>
             <TableRow v-if="!filteredAndSortedItems.length">
-              <TableCell colspan="9" class="text-center py-10 text-xs text-muted-foreground">
+              <TableCell colspan="8" class="text-center py-10 text-xs text-muted-foreground">
                 所选筛选条件下暂无聚合数据
               </TableCell>
             </TableRow>

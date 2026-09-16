@@ -26,7 +26,7 @@ export async function registerAuthRoutes(fastify: FastifyInstance): Promise<void
         data: {
           username: config.adminUsername,
           token: config.jwtSecret,
-          version: '1.1.0',
+          version: '1.1.1',
         },
       }
     }

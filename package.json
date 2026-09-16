@@ -1,6 +1,6 @@
 {
   "name": "new-pro",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "NewAPI 高性能多维实时监控与风险分析系统",
   "type": "module",
   "workspaces": [
