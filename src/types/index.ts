@@ -39,13 +39,6 @@ export interface DimensionAnalysisResult {
   items: DimensionItem[]
 }
 
-export interface DimensionFilterOptions {
-  model?: string
-  channelId?: number
-  username?: string
-  group?: string
-}
-
 export type RiskSeverity = 'critical' | 'high' | 'medium' | 'low'
 
 export interface RiskAlert {

@@ -7,20 +7,18 @@ import type {
   DimensionType,
   DimensionItem,
   DimensionAnalysisResult,
-  DimensionFilterOptions,
   TimeRangeKey,
 } from '../types/index.js'
 
-export type { DimensionType, DimensionItem, DimensionAnalysisResult, DimensionFilterOptions }
+export type { DimensionType, DimensionItem, DimensionAnalysisResult }
 
 export async function getDimensionAnalysis(
   dimension: DimensionType,
   rangeKey: TimeRangeKey = 'today',
-  limit: number = 50,
-  filters: DimensionFilterOptions = {}
+  limit: number = 50
 ): Promise<DimensionAnalysisResult> {
   const safeLimit = Math.min(Math.max(Number(limit) || 50, 1), 200)
-  const cacheKey = `dimension:${dimension}:${rangeKey}:${safeLimit}:${JSON.stringify(filters)}`
+  const cacheKey = `dimension:${dimension}:${rangeKey}:${safeLimit}`
   const cached = memoryCache.get<DimensionAnalysisResult>(cacheKey)
   if (cached) return cached
 
@@ -31,22 +29,6 @@ export async function getDimensionAnalysis(
   if (filter.startTime > 0) {
     params.push(filter.startTime, filter.endTime)
     whereClauses.push(`l.created_at >= $${params.length - 1} AND l.created_at <= $${params.length}`)
-  }
-  if (filters.model) {
-    params.push(filters.model)
-    whereClauses.push(`l.model_name = $${params.length}`)
-  }
-  if (filters.channelId) {
-    params.push(Number(filters.channelId))
-    whereClauses.push(`l.channel_id = $${params.length}`)
-  }
-  if (filters.username) {
-    params.push(filters.username)
-    whereClauses.push(`l.username = $${params.length}`)
-  }
-  if (filters.group) {
-    params.push(filters.group)
-    whereClauses.push(`l."group" = $${params.length}`)
   }
 
   const timeCondition = `WHERE ${whereClauses.join(' AND ')}`

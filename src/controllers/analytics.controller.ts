@@ -23,14 +23,10 @@ export async function registerAnalyticsRoutes(fastify: FastifyInstance): Promise
 
   // 2. 多维分析 (group, user, channel, ip, model)
   fastify.get('/analytics/dimensions', { preHandler: authGuard }, async (req: FastifyRequest) => {
-    const { dimension, range, limit, model, channelId, username, group } = (req.query as {
+    const { dimension, range, limit } = (req.query as {
       dimension?: DimensionType
       range?: TimeRangeKey
       limit?: string
-      model?: string
-      channelId?: string
-      username?: string
-      group?: string
     }) || {}
 
     const validDimensions: DimensionType[] = ['group', 'user', 'channel', 'ip', 'model']
@@ -39,12 +35,7 @@ export async function registerAnalyticsRoutes(fastify: FastifyInstance): Promise
     const safeRange = range && validRanges.includes(range) ? range : 'today'
     const lim = Math.min(Math.max(Number(limit) || 50, 1), 200)
 
-    const data = await getDimensionAnalysis(dim, safeRange, lim, {
-      model: model?.trim() || undefined,
-      channelId: channelId && !isNaN(Number(channelId)) ? Number(channelId) : undefined,
-      username: username?.trim() || undefined,
-      group: group?.trim() || undefined,
-    })
+    const data = await getDimensionAnalysis(dim, safeRange, lim)
     return { success: true, data }
   })
 
