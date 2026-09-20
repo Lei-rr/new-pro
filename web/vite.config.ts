@@ -16,11 +16,12 @@ export default defineConfig({
       '/api': {
         target: 'http://127.0.0.1:3033',
         changeOrigin: true,
+        ws: true,
       },
     },
   },
   build: {
-    chunkSizeWarningLimit: 800,
+    chunkSizeWarningLimit: 900,
     rollupOptions: {
       output: {
         manualChunks: {

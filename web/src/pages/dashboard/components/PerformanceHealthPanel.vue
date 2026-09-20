@@ -2,9 +2,8 @@
 import { HeartPulse, Timer, Gauge } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Badge } from '@/shared/ui/badge'
-import { formatNumber } from '@/shared/lib/utils'
 
-const props = defineProps<{
+defineProps<{
   health?: {
     systemSuccessRate: number
     avgLatencyMs: number

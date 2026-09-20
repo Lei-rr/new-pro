@@ -57,11 +57,12 @@ function animate(startVal: number, endVal: number, duration: number) {
 
 watch(
   () => props.value,
-  (newVal, oldVal) => {
+  (newVal) => {
     const target = newVal ?? 0
-    const current = oldVal ?? displayValue.value
+    // 以当前显示值为起点，而非上一个 prop，避免动画未完成时产生跳变
+    const current = displayValue.value
     if (props.onlyUp && target < current) {
-      // 若开启了仅单向递增，且新值变小，则保持原数值不倒退
+      // 仅单向递增：新值变小时保持当前数值，但需记录目标避免后续同向更新被吞
       return
     }
     animate(current, target, props.duration)

@@ -1,134 +1,76 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, RouterView, useRoute, useRouter } from 'vue-router'
 import {
-  LayoutDashboard,
-  Layers,
-  AlertTriangle,
-  Sun,
-  Moon,
-  LogOut,
-  RefreshCw,
   Activity,
+  AlertTriangle,
   Database,
+  Layers,
+  LayoutDashboard,
+  LogOut,
+  Moon,
+  RefreshCw,
   Search,
+  Sun,
 } from '@lucide/vue'
 import { Button } from '@/shared/ui/button'
 import { Badge } from '@/shared/ui/badge'
-import { AppTooltip } from '@/shared/ui/tooltip'
 import { CommandDialog, type CommandItem } from '@/shared/ui/command'
 import { useSessionStore } from '@/features/auth'
-import { http } from '@/shared/api/http'
-import { useRealtimePulse } from '@/shared/api/websocket'
+import { useRealtimePulse, resetRealtimeConnection } from '@/shared/api/websocket'
+import { triggerGlobalRefresh } from '@/shared/composables/useAutoRefresh'
+import { useTheme } from '@/shared/composables/useTheme'
 import { toast } from '@/shared/lib/toast'
-import { cn, formatTokens } from '@/shared/lib/utils'
-import { APP_VERSION } from '@/shared/constants/version'
+import { cn } from '@/shared/lib/utils'
 
 const router = useRouter()
 const route = useRoute()
 const session = useSessionStore()
-const { pulse: wsPulse, isConnected: wsConnected } = useRealtimePulse()
+const { isConnected } = useRealtimePulse()
+const { isDark, toggleTheme, initTheme } = useTheme()
 
-const isDark = ref(false)
 const commandOpen = ref(false)
-const isRefreshing = ref(false)
+const refreshing = ref(false)
 
-// 实时心跳吞吐条状态
-const pulse = computed(() => {
-  if (wsPulse.value) {
-    return {
-      qps: wsPulse.value.qps,
-      rpm: wsPulse.value.rpm,
-      tpm: wsPulse.value.tpm,
-      last1mRequests: wsPulse.value.last1mRequests,
-      avgLatency1m: wsPulse.value.avgLatency1m,
-      successRate1m: wsPulse.value.successRate1m,
-      dbConnected: true,
-      wsConnected: wsConnected.value,
-    }
-  }
-  return {
-    qps: 0,
-    rpm: 0,
-    tpm: 0,
-    last1mRequests: 0,
-    avgLatency1m: 0,
-    successRate1m: 100,
-    dbConnected: true,
-    wsConnected: wsConnected.value,
-  }
-})
+const navItems = [
+  { path: '/', label: '控制台大屏', icon: LayoutDashboard },
+  { path: '/dimensions', label: '多维分析详情', icon: Layers },
+  { path: '/risks', label: '实时风险预警', icon: AlertTriangle },
+]
 
-function initTheme() {
-  const saved = localStorage.getItem('theme')
-  if (saved === 'dark') {
-    document.documentElement.classList.add('dark')
-    isDark.value = true
-  } else {
-    document.documentElement.classList.remove('dark')
-    isDark.value = false
-  }
+function isActive(path: string): boolean {
+  return path === '/' ? route.path === '/' : route.path.startsWith(path)
 }
 
-function toggleDark() {
-  const dark = document.documentElement.classList.toggle('dark')
-  isDark.value = dark
-  localStorage.setItem('theme', dark ? 'dark' : 'light')
-}
-
-async function handleRefresh() {
-  isRefreshing.value = true
-  window.dispatchEvent(new CustomEvent('new-pro:refresh'))
-  setTimeout(() => {
-    isRefreshing.value = false
+function handleRefresh(): void {
+  refreshing.value = true
+  triggerGlobalRefresh()
+  window.setTimeout(() => {
+    refreshing.value = false
   }, 400)
 }
 
-async function handleLogout() {
+async function handleLogout(): Promise<void> {
+  resetRealtimeConnection()
   await session.logout()
   toast.info('已安全退出')
-  router.replace('/login')
+  await router.replace('/login')
 }
 
-function isActive(path: string) {
-  if (path === '/') return route.path === '/'
-  return route.path.startsWith(path)
+function navigate(path: string): void {
+  commandOpen.value = false
+  void router.push(path)
 }
 
 const commandItems = computed<CommandItem[]>(() => [
-  {
-    id: 'nav-overview',
-    title: '控制台大屏',
-    subtitle: '全局核心指标、吞吐量、时序趋势与渠道状态',
+  ...navItems.map((item) => ({
+    id: `nav-${item.path}`,
+    title: item.label,
+    subtitle: item.path === '/' ? '全局核心指标、吞吐量、时序趋势与渠道状态' : undefined,
     category: '导航',
-    icon: LayoutDashboard,
-    action: () => {
-      commandOpen.value = false
-      router.push('/')
-    },
-  },
-  {
-    id: 'nav-dimensions',
-    title: '多维分析详情',
-    subtitle: '按分组、用户、渠道、IP、模型进行深度钻取分析',
-    category: '导航',
-    icon: Layers,
-    action: () => {
-      commandOpen.value = false
-      router.push('/dimensions')
-    },
-  },
-  {
-    id: 'nav-risks',
-    title: '实时风险预警',
-    subtitle: '高危IP封禁建议、失败率尖峰、异常高额消耗告警',
-    category: '导航',
-    icon: AlertTriangle,
-    action: () => {
-      commandOpen.value = false
-      router.push('/risks')
-    },
-  },
+    icon: item.icon,
+    action: () => navigate(item.path),
+  })),
   {
     id: 'act-theme',
     title: isDark.value ? '切换为浅色模式' : '切换为深色模式',
@@ -136,7 +78,7 @@ const commandItems = computed<CommandItem[]>(() => [
     icon: isDark.value ? Sun : Moon,
     action: () => {
       commandOpen.value = false
-      toggleDark()
+      toggleTheme()
     },
   },
   {
@@ -156,14 +98,14 @@ const commandItems = computed<CommandItem[]>(() => [
     icon: LogOut,
     action: () => {
       commandOpen.value = false
-      handleLogout()
+      void handleLogout()
     },
   },
 ])
 
-function handleGlobalKey(e: KeyboardEvent) {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-    e.preventDefault()
+function handleGlobalKey(event: KeyboardEvent): void {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
     commandOpen.value = !commandOpen.value
   }
 }
@@ -180,10 +122,8 @@ onUnmounted(() => {
 
 <template>
   <div class="relative flex min-h-svh flex-col bg-background selection:bg-primary selection:text-primary-foreground">
-    <!-- 顶部主导航栏 -->
     <header class="sticky top-0 z-40 w-full border-b border-border/40 bg-background/80 backdrop-blur-md">
       <div class="mx-auto flex h-14 w-full max-w-7xl items-center justify-between px-4 sm:h-16 sm:px-6 lg:px-8">
-        <!-- Logo 与核心导航 -->
         <div class="flex items-center gap-6">
           <RouterLink to="/" class="flex items-center gap-2.5 text-base font-semibold tracking-tight">
             <span class="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground shadow-md shadow-primary/20">
@@ -192,34 +132,24 @@ onUnmounted(() => {
             <span class="font-bold">New-Pro</span>
           </RouterLink>
 
-          <!-- 三个主业务页面切换链接 -->
           <nav class="hidden md:flex items-center gap-1">
-            <Button variant="ghost" size="sm" as-child class="h-9 px-3 text-sm cursor-pointer">
-              <RouterLink to="/" :class="cn(isActive('/') && 'bg-accent text-accent-foreground font-medium')">
-                <LayoutDashboard class="size-4" />
-                控制台大屏
-              </RouterLink>
-            </Button>
-
-            <Button variant="ghost" size="sm" as-child class="h-9 px-3 text-sm cursor-pointer">
-              <RouterLink to="/dimensions" :class="cn(isActive('/dimensions') && 'bg-accent text-accent-foreground font-medium')">
-                <Layers class="size-4" />
-                多维分析详情
-              </RouterLink>
-            </Button>
-
-            <Button variant="ghost" size="sm" as-child class="h-9 px-3 text-sm cursor-pointer">
-              <RouterLink to="/risks" :class="cn(isActive('/risks') && 'bg-accent text-accent-foreground font-medium')">
-                <AlertTriangle class="size-4" />
-                实时风险预警
+            <Button
+              v-for="item in navItems"
+              :key="item.path"
+              variant="ghost"
+              size="sm"
+              as-child
+              class="h-9 px-3 text-sm cursor-pointer"
+            >
+              <RouterLink :to="item.path" :class="cn(isActive(item.path) && 'bg-accent text-accent-foreground font-medium')">
+                <component :is="item.icon" class="size-4" />
+                {{ item.label }}
               </RouterLink>
             </Button>
           </nav>
         </div>
 
-        <!-- 顶部操作区 -->
         <div class="flex items-center gap-3">
-          <!-- ⌘K 快捷搜寻 -->
           <Button
             variant="outline"
             size="sm"
@@ -233,31 +163,28 @@ onUnmounted(() => {
             </kbd>
           </Button>
 
-          <!-- 刷新按钮 -->
           <Button
             variant="ghost"
             size="icon"
             class="size-8 cursor-pointer text-muted-foreground hover:text-foreground"
-            :disabled="isRefreshing"
+            :disabled="refreshing"
             title="刷新数据"
             @click="handleRefresh"
           >
-            <RefreshCw class="size-4" :class="isRefreshing && 'animate-spin'" />
+            <RefreshCw class="size-4" :class="refreshing && 'animate-spin'" />
           </Button>
 
-          <!-- 主题切换 (浅色 / 深色) -->
           <Button
             variant="ghost"
             size="icon"
             class="size-8 cursor-pointer text-muted-foreground hover:text-foreground"
             :title="isDark ? '切换为浅色模式' : '切换为深色模式'"
-            @click="toggleDark"
+            @click="toggleTheme"
           >
             <Sun v-if="isDark" class="size-4 text-amber-500" />
             <Moon v-else class="size-4 text-slate-600" />
           </Button>
 
-          <!-- 退出登录 -->
           <Button
             variant="ghost"
             size="icon"
@@ -270,39 +197,22 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 移动端底栏导航条 -->
       <div class="flex md:hidden border-t border-border/40 px-2 py-1.5 justify-around bg-muted/20">
         <RouterLink
-          to="/"
+          v-for="item in navItems"
+          :key="item.path"
+          :to="item.path"
           class="flex items-center gap-1.5 text-xs py-1 px-3 rounded-md transition-colors"
-          :class="isActive('/') ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground'"
+          :class="isActive(item.path) ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground'"
         >
-          <LayoutDashboard class="size-3.5" />
-          控制台
-        </RouterLink>
-        <RouterLink
-          to="/dimensions"
-          class="flex items-center gap-1.5 text-xs py-1 px-3 rounded-md transition-colors"
-          :class="isActive('/dimensions') ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground'"
-        >
-          <Layers class="size-3.5" />
-          多维分析
-        </RouterLink>
-        <RouterLink
-          to="/risks"
-          class="flex items-center gap-1.5 text-xs py-1 px-3 rounded-md transition-colors"
-          :class="isActive('/risks') ? 'bg-primary text-primary-foreground font-medium' : 'text-muted-foreground'"
-        >
-          <AlertTriangle class="size-3.5" />
-          风险预警
+          <component :is="item.icon" class="size-3.5" />
+          {{ item.label }}
         </RouterLink>
       </div>
     </header>
 
-    <!-- 全局快捷跳转搜索指令框 -->
     <CommandDialog v-model:open="commandOpen" :items="commandItems" />
 
-    <!-- 核心视图页面注入区域 -->
     <main class="flex-1 w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
       <RouterView v-slot="{ Component }">
         <Transition name="page-fade" mode="out-in">
@@ -311,34 +221,34 @@ onUnmounted(() => {
       </RouterView>
     </main>
 
-    <!-- 页脚状态条 (优化移动端自适应排版与紧凑展示) -->
     <footer class="mt-auto border-t border-border/40 py-3 text-xs text-muted-foreground bg-muted/10">
       <div class="mx-auto flex w-full max-w-7xl flex-col sm:flex-row items-center justify-between gap-2.5 sm:gap-4 px-4 sm:px-6 lg:px-8">
         <div class="flex items-center gap-2">
           <span class="font-semibold text-foreground tracking-tight">New-Pro</span>
-          <Badge variant="outline" class="h-4.5 px-1.5 text-[10px] font-mono">v{{ APP_VERSION }}</Badge>
+          <Badge variant="outline" class="h-4.5 px-1.5 text-[10px] font-mono">v{{ session.version }}</Badge>
           <span class="hidden sm:inline text-border">|</span>
           <span class="text-[11px] text-muted-foreground/80">高性能实时监控</span>
         </div>
         <div class="flex flex-wrap items-center justify-center gap-3 text-xs">
-          <!-- WebSocket 状态胶囊 -->
           <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/60 text-[11px] shadow-2xs">
             <span
               class="size-2 rounded-full transition-all shrink-0"
-              :class="pulse.wsConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse' : 'bg-amber-500'"
+              :class="isConnected ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)] animate-pulse' : 'bg-amber-500'"
             />
             <span class="text-muted-foreground">WebSocket:</span>
-            <span :class="pulse.wsConnected ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-amber-500 font-medium'">
-              {{ pulse.wsConnected ? '已直连' : '连接中...' }}
+            <span :class="isConnected ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-amber-500 font-medium'">
+              {{ isConnected ? '已直连' : '连接中...' }}
             </span>
           </div>
 
-          <!-- PostgreSQL 状态胶囊 -->
           <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-border/60 bg-card/60 text-[11px] shadow-2xs">
-            <Database class="size-3 text-emerald-500 shrink-0" />
+            <Database class="size-3 shrink-0" :class="session.dbConnected ? 'text-emerald-500' : 'text-destructive'" />
             <span class="text-muted-foreground">PostgreSQL:</span>
-            <span class="text-emerald-600 dark:text-emerald-400 font-medium">正常通信</span>
+            <span :class="session.dbConnected ? 'text-emerald-600 dark:text-emerald-400 font-medium' : 'text-destructive font-medium'">
+              {{ session.dbConnected ? '正常通信' : '连接异常' }}
+            </span>
           </div>
+
         </div>
       </div>
     </footer>

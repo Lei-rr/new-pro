@@ -1,22 +1,22 @@
 {
   "name": "new-pro",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "NewAPI 高性能多维实时监控与风险分析系统",
+  "packageManager": "pnpm@10.18.0",
   "type": "module",
-  "workspaces": [
-    "web"
-  ],
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
-    "dev": "npm run dev:server",
-    "dev:server": "tsx watch src/server.ts --port 3033",
-    "dev:web": "npm --workspace new-pro-web run dev",
+    "dev": "pnpm run dev:server",
+    "dev:server": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "dev:web": "pnpm --filter new-pro-web run dev",
     "start": "node dist/server.js",
-    "build": "npm run build:server && npm run build:web",
-    "build:server": "rm -rf dist && esbuild src/server.ts --bundle --platform=node --format=esm --target=node20 --packages=external --outfile=dist/server.js",
-    "build:web": "npm --workspace new-pro-web run build"
+    "build": "pnpm run build:server && pnpm run build:web",
+    "build:server": "node scripts/build-server.mjs",
+    "build:web": "pnpm --filter new-pro-web run build",
+    "clean": "rm -rf dist web/dist",
+    "typecheck": "tsc --noEmit && pnpm --filter new-pro-web run typecheck"
   },
   "dependencies": {
     "@fastify/compress": "^9.1.0",
@@ -26,7 +26,6 @@
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.2",
     "@fastify/websocket": "^11.3.0",
-    "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "ip2region": "^2.3.0",
     "pg": "^8.13.3"

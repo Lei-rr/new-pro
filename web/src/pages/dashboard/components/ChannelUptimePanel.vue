@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Activity, Radio, CheckCircle2, AlertCircle, Clock } from '@lucide/vue'
+import { Activity } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Badge } from '@/shared/ui/badge'
-import { formatNumber } from '@/shared/lib/utils'
 
 const props = defineProps<{
   channels?: Array<{

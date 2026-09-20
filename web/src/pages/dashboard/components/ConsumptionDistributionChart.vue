@@ -6,7 +6,7 @@ import { BarChart3, AreaChart, WalletCards, Hash } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
 import { Badge } from '@/shared/ui/badge'
-import { formatNumber, formatTokens } from '@/shared/lib/utils'
+import { QUOTA_PER_USD, formatTokens } from '@/shared/lib/utils'
 
 const props = defineProps<{
   distribution?: {
@@ -44,7 +44,7 @@ const chartOption = computed(() => {
 
   const series = dist.series.map((s, idx) => {
     const rawArr = metricType.value === 'quota' ? s.quotaData : s.tokensData
-    const data = metricType.value === 'quota' ? rawArr.map((v) => Number((v / 500000).toFixed(4))) : rawArr
+    const data = metricType.value === 'quota' ? rawArr.map((v) => Number((v / QUOTA_PER_USD).toFixed(4))) : rawArr
     const color = colorPalette[idx % colorPalette.length]
 
     if (chartType.value === 'area') {

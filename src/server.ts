@@ -1,105 +1,74 @@
-import Fastify from 'fastify'
-import cors from '@fastify/cors'
-import cookie from '@fastify/cookie'
-import helmet from '@fastify/helmet'
-import rateLimit from '@fastify/rate-limit'
-import compress from '@fastify/compress'
-import fastifyStatic from '@fastify/static'
-import fastifyWebsocket from '@fastify/websocket'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
-import fs from 'node:fs'
-import { loadConfig } from './config.js'
-import { initDb, closeDb } from './db.js'
-import { registerApiRoutes } from './routes.js'
+import { auditConfig, getConfig } from './config.js'
+import { buildApp } from './core/app.js'
+import { closeDb, initDb, isDbReady } from './core/db.js'
+import { rootLogger, setLogLevel } from './core/logger.js'
 
-const __filename = fileURLToPath(import.meta.url)
-const __dirname = path.dirname(__filename)
+const config = getConfig()
+setLogLevel(config.logLevel === 'silent' ? 'fatal' : config.logLevel)
 
-const config = loadConfig()
+if (!config.pgDsn) {
+  rootLogger.fatal('DATABASE_URL 未配置，服务无法启动')
+  process.exit(1)
+}
 
-// 初始化数据库连接池
+for (const warning of auditConfig(config)) {
+  rootLogger.warn({ env: config.env }, warning)
+}
+
 initDb(config.pgDsn)
 
-const server = Fastify({
-  logger: {
-    level: config.logLevel,
-  },
-})
+const app = await buildApp()
+let shuttingDown = false
 
-// 注册 WebSocket 支持
-await server.register(fastifyWebsocket)
+async function shutdown(signal: string): Promise<void> {
+  if (shuttingDown) return
+  shuttingDown = true
+  const started = Date.now()
+  rootLogger.info({ signal }, 'shutting down')
 
-// 注册基础插件
-await server.register(cors, {
-  origin: true,
-  credentials: true,
-})
+  // 兜底超时：避免在途查询卡住导致容器被 SIGKILL 强杀
+  const forceExit = setTimeout(() => {
+    rootLogger.error({ timeoutMs: config.shutdownTimeoutMs }, 'graceful shutdown timed out, forcing exit')
+    process.exit(1)
+  }, config.shutdownTimeoutMs)
+  forceExit.unref?.()
 
-await server.register(cookie)
-
-await server.register(helmet, {
-  contentSecurityPolicy: false, // 允许 SPA 内部内联资源和 SVG
-  crossOriginOpenerPolicy: false, // 允许 HTTP IP 环境下跨源上下文平稳工作
-  crossOriginResourcePolicy: false,
-  originAgentCluster: false,
-})
-
-await server.register(rateLimit, {
-  max: 300,
-  timeWindow: '1 minute',
-})
-
-await server.register(compress)
-
-// 注册 API 路由
-await server.register(registerApiRoutes, { prefix: '/api' })
-
-// 全局异常处理器，统一错误响应格式
-server.setErrorHandler((error: any, _request, reply) => {
-  server.log.error(error)
-  const statusCode = typeof error?.statusCode === 'number' && error.statusCode >= 400 && error.statusCode < 600 ? error.statusCode : 500
-  const message = statusCode === 500 ? '服务器内部错误，请稍后重试' : (error?.message || '请求处理异常')
-  reply.status(statusCode).send({
-    success: false,
-    error: message,
-  })
-})
-
-// 静态资源托管（打包后 web 产物）
-const webDistPath = path.resolve(process.cwd(), 'web/dist')
-if (fs.existsSync(webDistPath)) {
-  await server.register(fastifyStatic, {
-    root: webDistPath,
-    prefix: '/',
-  })
-
-  // SPA fallback
-  server.setNotFoundHandler(async (req, reply) => {
-    if (req.raw.url && req.raw.url.startsWith('/api')) {
-      reply.status(404).send({ success: false, error: 'API not found' })
-      return
-    }
-    return reply.sendFile('index.html')
-  })
-}
-
-// 优雅关闭
-const closeSignals = ['SIGINT', 'SIGTERM'] as const
-for (const signal of closeSignals) {
-  process.on(signal, async () => {
-    server.log.info(`Received ${signal}, closing server gracefully...`)
-    await server.close()
+  try {
+    await app.close()
     await closeDb()
-    process.exit(0)
+    rootLogger.info({ durationMs: Date.now() - started }, 'shutdown complete')
+  } finally {
+    clearTimeout(forceExit)
+  }
+}
+
+for (const signal of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(signal, () => {
+    void shutdown(signal).then(() => process.exit(0))
   })
 }
+
+process.on('unhandledRejection', (reason) => {
+  rootLogger.error({ err: reason }, 'unhandled promise rejection')
+})
+
+process.on('uncaughtException', (err) => {
+  rootLogger.fatal({ err }, 'uncaught exception')
+  void shutdown('uncaughtException').then(() => process.exit(1))
+})
 
 try {
-  await server.listen({ host: config.host, port: config.port })
-  console.log(`\n🚀 new-pro 分析服务已启动: http://${config.host}:${config.port}`)
-  console.log(`📊 数据库连接目标: ${config.pgDsn.replace(/:[^:@]+@/, ':****@')}\n`)
+  const address = await app.listen({ host: config.host, port: config.port })
+  rootLogger.info(
+    {
+      address,
+      env: config.env,
+      db: isDbReady() ? 'ready' : 'unavailable',
+      pulseIntervalSec: config.pulseIntervalSec,
+    },
+    'new-pro started'
+  )
 } catch (err) {
-  server.log.error(err)
+  rootLogger.fatal({ err }, 'server failed to start')
   process.exit(1)
 }

@@ -1,53 +1,74 @@
-export interface ApiResponse<T = any> {
+export interface ApiEnvelope<T> {
   success: boolean
   data?: T
   error?: string
-  message?: string
 }
 
-let unauthorizedHandler: (() => void) | null = null
-
-export function setUnauthorizedHandler(fn: () => void) {
-  unauthorizedHandler = fn
+export class ApiError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+    readonly kind: 'network' | 'timeout' | 'http' = 'http'
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
 }
 
-export async function request<T = any>(url: string, init?: RequestInit): Promise<T> {
-  const headers = new Headers(init?.headers || {})
-  if (!headers.has('Content-Type') && !(init?.body instanceof FormData) && init?.body) {
+type UnauthorizedHandler = () => void
+
+let unauthorizedHandler: UnauthorizedHandler | null = null
+const DEFAULT_TIMEOUT_MS = 15000
+
+export function setUnauthorizedHandler(handler: UnauthorizedHandler): void {
+  unauthorizedHandler = handler
+}
+
+interface RequestOptions extends Omit<RequestInit, 'signal'> {
+  timeoutMs?: number
+  skipUnauthorizedHandler?: boolean
+}
+
+export async function request<T>(url: string, options: RequestOptions = {}): Promise<T> {
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, skipUnauthorizedHandler, ...init } = options
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+
+  const headers = new Headers(init.headers)
+  if (init.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
 
-  const res = await fetch(url, {
-    ...init,
-    headers,
-    credentials: 'include',
-  })
-
-  if (res.status === 401) {
-    if (unauthorizedHandler) {
-      unauthorizedHandler()
-    }
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error || '未授权或登录已过期')
+  let response: Response
+  try {
+    response = await fetch(url, { ...init, headers, credentials: 'include', signal: controller.signal })
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === 'AbortError'
+    throw new ApiError(0, aborted ? '请求超时，请稍后重试' : '网络连接异常，请检查服务状态', aborted ? 'timeout' : 'network')
+  } finally {
+    clearTimeout(timer)
   }
 
-  const data: ApiResponse<T> = await res.json().catch(() => ({
-    success: false,
-    error: `请求响应异常 (${res.status})`,
-  }))
+  const payload = (await response.json().catch(() => null)) as ApiEnvelope<T> | null
 
-  if (!res.ok || !data.success) {
-    throw new Error(data.error || data.message || `请求失败 (${res.status})`)
+  if (response.status === 401) {
+    if (!skipUnauthorizedHandler) unauthorizedHandler?.()
+    throw new ApiError(401, payload?.error || '未授权或登录已过期')
   }
 
-  return data.data as T
+  if (!response.ok || !payload?.success) {
+    throw new ApiError(response.status, payload?.error || `请求失败 (${response.status})`)
+  }
+
+  return payload.data as T
 }
 
 export const http = {
-  get: <T = any>(url: string) => request<T>(url, { method: 'GET' }),
-  post: <T = any>(url: string, body?: any) =>
+  get: <T>(url: string, options?: RequestOptions) => request<T>(url, { ...options, method: 'GET' }),
+  post: <T>(url: string, body?: unknown, options?: RequestOptions) =>
     request<T>(url, {
+      ...options,
       method: 'POST',
-      body: body ? JSON.stringify(body) : undefined,
+      body: body === undefined ? undefined : JSON.stringify(body),
     }),
 }

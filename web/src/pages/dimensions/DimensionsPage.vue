@@ -1,56 +1,59 @@
 <script setup lang="ts">
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRoute } from 'vue-router'
-import {
-  Layers,
-  Users,
-  Radio,
-  Globe2,
-  Cpu,
-  ArrowUpDown,
-  Download,
-  Search,
-  MapPin,
-} from '@lucide/vue'
+import { ArrowUpDown, Cpu, Download, Globe2, Layers, MapPin, Radio, Search, Users } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Button } from '@/shared/ui/button'
 import { Badge } from '@/shared/ui/badge'
 import { Input } from '@/shared/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/shared/ui/table'
-import { http } from '@/shared/api/http'
+import { analyticsApi } from '@/shared/api/endpoints'
 import { toast } from '@/shared/lib/toast'
 import { errorMessage } from '@/shared/lib/errors'
 import { formatNumber, formatTokens } from '@/shared/lib/utils'
 import { TIME_RANGES } from '@/shared/constants/time-ranges'
 import { useAutoRefresh } from '@/shared/composables/useAutoRefresh'
 import { exportToCsv } from '@/shared/composables/useCsvExport'
+import type { DimensionAnalysisResult, DimensionItem, DimensionType, TimeRangeKey } from '@/shared/api/types'
 
-type DimensionType = 'group' | 'user' | 'channel' | 'ip' | 'model'
+type SortKey = 'name' | 'totalRequests' | 'successRequests' | 'failedRequests' | 'successRate' | 'costUsd' | 'totalTokens' | 'avgLatencyMs'
 
-const route = useRoute()
-
-const dimensions = [
-  { key: 'group' as DimensionType, label: '分组维度', icon: Layers, desc: '按用户组(default/VIP等)聚合' },
-  { key: 'user' as DimensionType, label: '用户维度', icon: Users, desc: '按调用发起者账号聚合' },
-  { key: 'channel' as DimensionType, label: '渠道维度', icon: Radio, desc: '按上游提供商与中转路由聚合' },
-  { key: 'ip' as DimensionType, label: 'IP 地址维度', icon: Globe2, desc: '按客户端访问公网IP聚合' },
-  { key: 'model' as DimensionType, label: '模型维度', icon: Cpu, desc: '按具体 LLM 模型名称聚合' },
+const DIMENSIONS: Array<{ key: DimensionType; label: string; icon: typeof Layers; desc: string }> = [
+  { key: 'group', label: '分组维度', icon: Layers, desc: '按用户组(default/VIP等)聚合' },
+  { key: 'user', label: '用户维度', icon: Users, desc: '按调用发起者账号聚合' },
+  { key: 'channel', label: '渠道维度', icon: Radio, desc: '按上游提供商与中转路由聚合' },
+  { key: 'ip', label: 'IP 地址维度', icon: Globe2, desc: '按客户端访问公网IP聚合' },
+  { key: 'model', label: '模型维度', icon: Cpu, desc: '按具体 LLM 模型名称聚合' },
 ]
 
-const currentDim = ref<DimensionType>((route.query.dimension as DimensionType) || 'group')
-const currentRange = ref((route.query.range as string) || 'today')
+const SORTABLE_COLUMNS: Array<{ key: SortKey; label: string }> = [
+  { key: 'totalRequests', label: '总调用量' },
+  { key: 'successRequests', label: '成功' },
+  { key: 'failedRequests', label: '失败' },
+  { key: 'successRate', label: '成功率' },
+  { key: 'costUsd', label: '消耗金额' },
+  { key: 'totalTokens', label: '总 Token' },
+  { key: 'avgLatencyMs', label: '均耗时' },
+]
+
+const route = useRoute()
+const isDimension = (value: unknown): value is DimensionType =>
+  DIMENSIONS.some((item) => item.key === value)
+const isRange = (value: unknown): value is TimeRangeKey =>
+  TIME_RANGES.some((item) => item.key === value)
+
+const currentDim = ref<DimensionType>(isDimension(route.query.dimension) ? route.query.dimension : 'group')
+const currentRange = ref<TimeRangeKey>(isRange(route.query.range) ? route.query.range : 'today')
 const searchQuery = ref('')
-const sortField = ref('totalRequests')
+const sortKey = ref<SortKey>('totalRequests')
 const sortAsc = ref(false)
 const loading = ref(true)
-const result = ref<any>(null)
+const result = ref<DimensionAnalysisResult | null>(null)
 
-async function loadData(silent = false) {
+async function loadData(silent = false): Promise<void> {
   if (!silent) loading.value = true
   try {
-    const url = `/api/analytics/dimensions?dimension=${currentDim.value}&range=${currentRange.value}&limit=100`
-    const res = await http.get(url)
-    result.value = res
+    result.value = await analyticsApi.dimensions(currentDim.value, currentRange.value, 100)
   } catch (err) {
     if (!silent) toast.error(errorMessage(err))
   } finally {
@@ -58,136 +61,138 @@ async function loadData(silent = false) {
   }
 }
 
-function selectDimension(dim: DimensionType) {
-  currentDim.value = dim
-  loadData()
+function selectDimension(dimension: DimensionType): void {
+  if (dimension === currentDim.value) return
+  currentDim.value = dimension
+  void loadData()
 }
 
-function selectRange(range: string) {
+function selectRange(range: TimeRangeKey): void {
+  if (range === currentRange.value) return
   currentRange.value = range
-  loadData()
+  void loadData()
 }
 
-function toggleSort(field: string) {
-  if (sortField.value === field) {
-    sortAsc.value = !sortAsc.value
-  } else {
-    sortField.value = field
+function toggleSort(key: SortKey): void {
+  if (sortKey.value === key) sortAsc.value = !sortAsc.value
+  else {
+    sortKey.value = key
     sortAsc.value = false
   }
 }
 
-const filteredAndSortedItems = computed(() => {
-  if (!result.value?.items) return []
-  let items = [...result.value.items]
+const visibleItems = computed<DimensionItem[]>(() => {
+  const items = result.value?.items ?? []
+  const keyword = searchQuery.value.trim().toLowerCase()
 
-  if (searchQuery.value.trim()) {
-    const q = searchQuery.value.trim().toLowerCase()
-    items = items.filter(
-      (it: any) =>
-        it.name.toLowerCase().includes(q) ||
-        it.id.toLowerCase().includes(q) ||
-        (it.location && it.location.toLowerCase().includes(q))
-    )
-  }
+  const filtered = keyword
+    ? items.filter(
+        (item) =>
+          item.name.toLowerCase().includes(keyword) ||
+          item.id.toLowerCase().includes(keyword) ||
+          (item.location?.toLowerCase().includes(keyword) ?? false)
+      )
+    : [...items]
 
-  items.sort((a: any, b: any) => {
-    const vA = a[sortField.value]
-    const vB = b[sortField.value]
-    if (typeof vA === 'string') {
-      return sortAsc.value ? vA.localeCompare(vB) : vB.localeCompare(vA)
+  const field = sortKey.value
+  filtered.sort((a, b) => {
+    const left = a[field]
+    const right = b[field]
+    if (typeof left === 'string' && typeof right === 'string') {
+      return sortAsc.value ? left.localeCompare(right) : right.localeCompare(left)
     }
-    return sortAsc.value ? vA - vB : vB - vA
+    const diff = Number(left) - Number(right)
+    return sortAsc.value ? diff : -diff
   })
-
-  return items
+  return filtered
 })
 
-function handleExportCsv() {
-  if (!filteredAndSortedItems.value.length) return
-  const isIp = currentDim.value === 'ip'
-  const headers = isIp
-    ? ['IP地址', '归属地', '总请求', '成功数', '失败数', '成功率%', '消耗金额($)', '总Token', '平均耗时(ms)', '首次出现', '最近活跃']
-    : ['名称', '总请求', '成功数', '失败数', '成功率%', '消耗金额($)', '总Token', '平均耗时(ms)', '首次出现', '最近活跃']
+const currentDimensionLabel = computed(
+  () => DIMENSIONS.find((item) => item.key === currentDim.value)?.label ?? ''
+)
+const isIpDimension = computed(() => currentDim.value === 'ip')
 
-  const rows = filteredAndSortedItems.value.map((i: any) => {
-    if (isIp) {
-      return [
-        i.name,
-        i.location || '-',
-        i.totalRequests,
-        i.successRequests,
-        i.failedRequests,
-        i.successRate,
-        i.costUsd,
-        i.totalTokens,
-        i.avgLatencyMs,
-        i.firstSeen || '',
-        i.lastSeen || '',
-      ]
-    }
-    return [
-      i.name,
-      i.totalRequests,
-      i.successRequests,
-      i.failedRequests,
-      i.successRate,
-      i.costUsd,
-      i.totalTokens,
-      i.avgLatencyMs,
-      i.firstSeen || '',
-      i.lastSeen || '',
-    ]
-  })
+function handleExport(): void {
+  const items = visibleItems.value
+  if (!items.length) return
+
+  const headers = [
+    ...(isIpDimension.value ? ['IP地址', '归属地'] : ['名称']),
+    '总请求',
+    '成功数',
+    '失败数',
+    '成功率%',
+    '消耗金额($)',
+    '总Token',
+    '输入Token',
+    '输出Token',
+    '平均耗时(ms)',
+    '首次出现',
+    '最近活跃',
+  ]
+
+  const rows = items.map((item) => [
+    item.name,
+    ...(isIpDimension.value ? [item.location || '-'] : []),
+    item.totalRequests,
+    item.successRequests,
+    item.failedRequests,
+    item.successRate,
+    item.costUsd,
+    item.totalTokens,
+    item.promptTokens,
+    item.completionTokens,
+    item.avgLatencyMs,
+    item.firstSeen,
+    item.lastSeen,
+  ])
 
   exportToCsv(`NewAPI-${currentDim.value}-${currentRange.value}`, headers, rows)
 }
 
-// 静默自动刷新 (10 秒)
 useAutoRefresh(() => loadData(true), {
   intervalMs: 10000,
-  onRefreshEvent: () => loadData(false),
+  onManualRefresh: () => loadData(false),
 })
 
-loadData()
+void loadData()
 </script>
 
 <template>
   <div class="space-y-6">
-    <!-- 顶部标题与维度切换控制 -->
     <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
       <div>
         <h1 class="text-2xl font-bold tracking-tight text-foreground flex items-center gap-2">
           <span>多维统计分析</span>
-          <Badge variant="outline" class="font-normal text-xs text-muted-foreground">
-            深度钻取
-          </Badge>
+          <Badge variant="outline" class="font-normal text-xs text-muted-foreground">深度钻取</Badge>
         </h1>
         <p class="text-xs text-muted-foreground mt-1">
           按组织分组、终端用户、上游渠道、客户端 IP 与大模型名称进行全量交叉下钻分析
         </p>
       </div>
 
-      <!-- 时间区间切换 -->
       <div class="inline-flex max-w-full overflow-x-auto no-scrollbar rounded-lg border border-border/60 bg-muted/30 p-1">
         <Button
-          v-for="r in TIME_RANGES"
-          :key="r.key"
+          v-for="item in TIME_RANGES"
+          :key="item.key"
           size="xs"
           variant="ghost"
           class="h-7 text-xs px-2.5 rounded-md cursor-pointer transition-all shrink-0 whitespace-nowrap"
-          :class="currentRange === r.key ? 'bg-card text-foreground shadow-xs font-semibold' : 'text-muted-foreground hover:text-foreground'"
-          @click="selectRange(r.key)"
+          :class="
+            currentRange === item.key
+              ? 'bg-card text-foreground shadow-xs font-semibold'
+              : 'text-muted-foreground hover:text-foreground'
+          "
+          @click="selectRange(item.key)"
         >
-          {{ r.label }}
+          {{ item.label }}
         </Button>
       </div>
     </div>
 
-    <!-- 维度标签选择卡片 (5 大核心维度) -->
     <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
       <Card
-        v-for="dim in dimensions"
+        v-for="dim in DIMENSIONS"
         :key="dim.key"
         class="border transition-all cursor-pointer select-none"
         :class="
@@ -208,23 +213,18 @@ loadData()
             <div class="text-xs font-semibold truncate" :class="currentDim === dim.key ? 'text-primary' : 'text-foreground'">
               {{ dim.label }}
             </div>
-            <div class="text-[10px] text-muted-foreground truncate mt-0.5">
-              {{ dim.desc }}
-            </div>
+            <div class="text-[10px] text-muted-foreground truncate mt-0.5">{{ dim.desc }}</div>
           </div>
         </CardContent>
       </Card>
     </div>
 
-    <!-- 多维分析表格容器 -->
     <Card class="border-border/60 shadow-xs">
       <CardHeader class="pb-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <CardTitle class="text-base font-semibold flex items-center gap-2">
-            <span>{{ dimensions.find(d => d.key === currentDim)?.label }}明细</span>
-            <Badge variant="secondary" class="text-xs font-mono">
-              共 {{ filteredAndSortedItems.length }} 项
-            </Badge>
+            <span>{{ currentDimensionLabel }}明细</span>
+            <Badge variant="secondary" class="text-xs font-mono">共 {{ visibleItems.length }} 项</Badge>
           </CardTitle>
           <CardDescription class="text-xs">支持任意字段升降序排序、归属地模糊查找与一键导出分析报表</CardDescription>
         </div>
@@ -234,11 +234,11 @@ loadData()
             <Search class="size-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input
               v-model="searchQuery"
-              :placeholder="currentDim === 'ip' ? '搜 IP 或归属地...' : '搜索名称/标识...'"
+              :placeholder="isIpDimension ? '搜 IP 或归属地...' : '搜索名称/标识...'"
               class="h-8 pl-8 text-xs placeholder:text-muted-foreground/70"
             />
           </div>
-          <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5 cursor-pointer shrink-0" @click="handleExportCsv">
+          <Button variant="outline" size="sm" class="h-8 text-xs gap-1.5 cursor-pointer shrink-0" @click="handleExport">
             <Download class="size-3.5" />
             <span>导出 CSV</span>
           </Button>
@@ -250,60 +250,30 @@ loadData()
             <TableRow class="hover:bg-transparent">
               <TableHead class="text-xs font-semibold cursor-pointer select-none" @click="toggleSort('name')">
                 <div class="flex items-center gap-1">
-                  <span>{{ currentDim === 'ip' ? 'IP 地址 / 地理位置' : '标识 / 名称' }}</span>
+                  <span>{{ isIpDimension ? 'IP 地址 / 地理位置' : '标识 / 名称' }}</span>
                   <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('totalRequests')">
+              <TableHead
+                v-for="column in SORTABLE_COLUMNS"
+                :key="column.key"
+                class="text-right text-xs font-semibold cursor-pointer select-none"
+                :class="column.key === 'avgLatencyMs' && 'pr-4'"
+                @click="toggleSort(column.key)"
+              >
                 <div class="flex items-center justify-end gap-1">
-                  <span>总调用量</span>
-                  <ArrowUpDown class="size-3 opacity-60" />
-                </div>
-              </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('successRequests')">
-                <div class="flex items-center justify-end gap-1">
-                  <span>成功</span>
-                  <ArrowUpDown class="size-3 opacity-60" />
-                </div>
-              </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('failedRequests')">
-                <div class="flex items-center justify-end gap-1">
-                  <span>失败</span>
-                  <ArrowUpDown class="size-3 opacity-60" />
-                </div>
-              </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('successRate')">
-                <div class="flex items-center justify-end gap-1">
-                  <span>成功率</span>
-                  <ArrowUpDown class="size-3 opacity-60" />
-                </div>
-              </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('costUsd')">
-                <div class="flex items-center justify-end gap-1">
-                  <span>消耗金额</span>
-                  <ArrowUpDown class="size-3 opacity-60" />
-                </div>
-              </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none" @click="toggleSort('totalTokens')">
-                <div class="flex items-center justify-end gap-1">
-                  <span>总 Token</span>
-                  <ArrowUpDown class="size-3 opacity-60" />
-                </div>
-              </TableHead>
-              <TableHead class="text-right text-xs font-semibold cursor-pointer select-none pr-4" @click="toggleSort('avgLatencyMs')">
-                <div class="flex items-center justify-end gap-1">
-                  <span>均耗时</span>
+                  <span>{{ column.label }}</span>
                   <ArrowUpDown class="size-3 opacity-60" />
                 </div>
               </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
-            <TableRow v-for="item in filteredAndSortedItems" :key="item.id" class="hover:bg-muted/40">
+            <TableRow v-for="item in visibleItems" :key="item.id" class="hover:bg-muted/40">
               <TableCell class="font-medium text-xs">
                 <div class="flex flex-col gap-0.5">
                   <span class="font-mono text-foreground">{{ item.name }}</span>
-                  <div v-if="currentDim === 'ip'" class="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
+                  <div v-if="isIpDimension" class="flex items-center gap-1 text-[11px] text-muted-foreground mt-0.5">
                     <MapPin class="size-3 text-sky-500 shrink-0" />
                     <span class="truncate max-w-[200px]" :title="item.location || '未知位置'">
                       {{ item.location || '未知位置' }}
@@ -311,18 +281,14 @@ loadData()
                   </div>
                 </div>
               </TableCell>
-              <TableCell class="text-right font-mono text-xs font-semibold">
-                {{ formatNumber(item.totalRequests) }}
-              </TableCell>
+              <TableCell class="text-right font-mono text-xs font-semibold">{{ formatNumber(item.totalRequests) }}</TableCell>
               <TableCell class="text-right font-mono text-xs text-emerald-600 dark:text-emerald-400">
                 {{ formatNumber(item.successRequests) }}
               </TableCell>
-              <TableCell class="text-right font-mono text-xs text-rose-500">
-                {{ formatNumber(item.failedRequests) }}
-              </TableCell>
+              <TableCell class="text-right font-mono text-xs text-rose-500">{{ formatNumber(item.failedRequests) }}</TableCell>
               <TableCell class="text-right font-mono text-xs">
                 <Badge
-                  :variant="item.successRate >= 98 ? 'default' : (item.successRate >= 85 ? 'secondary' : 'destructive')"
+                  :variant="item.successRate >= 98 ? 'default' : item.successRate >= 85 ? 'secondary' : 'destructive'"
                   class="text-[10px] px-1.5 py-0 h-4 font-mono"
                   :class="item.successRate >= 98 && 'bg-emerald-500 hover:bg-emerald-600 text-white border-transparent'"
                 >
@@ -332,16 +298,18 @@ loadData()
               <TableCell class="text-right font-mono text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
                 ${{ item.costUsd.toFixed(4) }}
               </TableCell>
+              <!-- Tokens：第一行总量，第二行输入/输出拆分，与实时流水保持一致 -->
               <TableCell class="text-right font-mono text-xs">
-                {{ formatTokens(item.totalTokens) }}
+                <div>{{ formatTokens(item.totalTokens) }}</div>
+                <div class="text-[10px] text-muted-foreground">
+                  {{ formatTokens(item.promptTokens) }} / {{ formatTokens(item.completionTokens) }}
+                </div>
               </TableCell>
-              <TableCell class="text-right font-mono text-xs pr-4">
-                {{ item.avgLatencyMs }}ms
-              </TableCell>
+              <TableCell class="text-right font-mono text-xs pr-4">{{ item.avgLatencyMs }}ms</TableCell>
             </TableRow>
-            <TableRow v-if="!filteredAndSortedItems.length">
+            <TableRow v-if="!visibleItems.length">
               <TableCell colspan="8" class="text-center py-10 text-xs text-muted-foreground">
-                所选筛选条件下暂无聚合数据
+                {{ loading ? '正在加载聚合数据...' : '所选筛选条件下暂无聚合数据' }}
               </TableCell>
             </TableRow>
           </TableBody>

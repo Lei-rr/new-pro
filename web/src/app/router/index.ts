@@ -1,13 +1,14 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import { useSessionStore } from '@/features/auth'
 import AppLayout from '@/app/layouts/AppLayout.vue'
 import LoginPage from '@/pages/login/LoginPage.vue'
 
 const router = createRouter({
-  history: createWebHashHistory(),
+  history: createWebHistory(),
   routes: [
     {
       path: '/login',
+      name: 'login',
       component: LoginPage,
       meta: { public: true },
     },
@@ -32,29 +33,21 @@ const router = createRouter({
         },
       ],
     },
+    {
+      path: '/:pathMatch(.*)*',
+      redirect: '/',
+    },
   ],
 })
 
 router.beforeEach(async (to) => {
   const session = useSessionStore()
-  if (!session.loaded) {
-    try {
-      await session.load()
-    } catch (_) {}
-  }
+  if (!session.loaded) await session.load()
 
   if (to.meta.public) {
-    if (session.authenticated) {
-      return '/'
-    }
-    return true
+    return session.authenticated ? { name: 'dashboard' } : true
   }
-
-  if (!session.authenticated) {
-    return '/login'
-  }
-
-  return true
+  return session.authenticated ? true : { name: 'login', query: { redirect: to.fullPath } }
 })
 
 export default router

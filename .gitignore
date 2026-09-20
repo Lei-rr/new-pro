@@ -4,6 +4,11 @@ dist
 web/dist
 .vite
 
+# 编辑器与系统缓存
+.idea
+.vscode
+coverage
+
 # 本地环境变量与日志
 .env
 *.log

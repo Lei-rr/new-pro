@@ -3,10 +3,10 @@ import { Zap, Radio, Clock, ShieldCheck } from '@lucide/vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/shared/ui/card'
 import { Badge } from '@/shared/ui/badge'
 import { Progress } from '@/shared/ui/progress'
-import { formatNumber, formatTokens } from '@/shared/lib/utils'
+import { formatTokens } from '@/shared/lib/utils'
 import NumberRolling from '@/shared/ui/NumberRolling.vue'
 
-const props = defineProps<{
+defineProps<{
   stream?: {
     streamCount: number
     nonStreamCount: number

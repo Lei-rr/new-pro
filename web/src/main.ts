@@ -3,19 +3,24 @@ import { createPinia } from 'pinia'
 import App from '@/app/App.vue'
 import router from '@/app/router'
 import { setUnauthorizedHandler } from '@/shared/api/http'
+import { resetRealtimeConnection } from '@/shared/api/websocket'
 import { useSessionStore } from '@/features/auth'
 import '@/app/styles/index.css'
 
 const app = createApp(App)
-const pinia = createPinia()
+app.use(createPinia())
 
-app.use(pinia)
+// 兜底渲染异常，避免单个组件报错导致整页白屏
+app.config.errorHandler = (err, _instance, info) => {
+  console.error(`[Vue Error] ${info}`, err)
+}
 
-const session = useSessionStore(pinia)
+const session = useSessionStore()
 setUnauthorizedHandler(() => {
+  resetRealtimeConnection()
   session.invalidate()
-  if (router.currentRoute.value.path !== '/login') {
-    void router.replace('/login')
+  if (router.currentRoute.value.name !== 'login') {
+    void router.replace({ name: 'login' })
   }
 })
 
