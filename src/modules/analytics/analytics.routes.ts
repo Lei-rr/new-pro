@@ -23,6 +23,21 @@ function toDimension(value: unknown): DimensionType {
 }
 
 export async function registerAnalyticsRoutes(fastify: FastifyInstance): Promise<void> {
+  // —— 无鉴权公开统计：今日用量 + 实时速率，供站点首页展示（仅聚合数字，无明细） ——
+  fastify.get('/analytics/public-stats', async (_req: FastifyRequest, reply) => {
+    reply.header('Access-Control-Allow-Origin', '*')
+    const [{ summary }, pulse] = await Promise.all([
+      getDashboardOverview('today'),
+      getRealtimePulse(),
+    ])
+    return ok(reply, {
+      rpm: pulse.rpm,
+      tpm: pulse.tpm,
+      requests: summary.totalRequests,
+      tokens: summary.totalTokens,
+    })
+  })
+
   await fastify.register(async (scope) => {
     scope.addHook('preHandler', authGuard)
 
