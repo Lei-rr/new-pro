@@ -109,7 +109,7 @@ docker compose logs -f
 
 ### 3. 访问
 
-浏览器打开 `http://<服务器IP>:3033`，使用 `.env` 中的管理员账号登录。
+浏览器打开 `http://<服务器IP>:3001`，使用 `.env` 中的管理员账号登录。
 
 > 若通过域名或反向代理暴露到公网，请务必配置 HTTPS 并设置 `COOKIE_SECURE=true`。
 
@@ -126,7 +126,7 @@ docker compose logs -f
 | `JWT_SECRET` | 否 | 内置开发值 | 会话签名密钥（生产环境必须替换） |
 | `SESSION_TTL_SEC` | 否 | `604800` | 会话有效期（秒） |
 | `COOKIE_SECURE` | 否 | `false` | HTTPS 环境请设为 `true` |
-| `HOST` / `PORT` | 否 | `0.0.0.0` / `3033` | 监听地址与端口 |
+| `HOST` / `PORT` | 否 | `0.0.0.0` / `3001` | 监听地址与端口 |
 | `LOG_LEVEL` | 否 | `info` | 日志级别 `fatal`~`trace` / `silent` |
 | `TRUST_PROXY` | 否 | `false` | 反向代理后设为 `true` 以获取真实客户端 IP |
 | `CORS_ORIGINS` | 否 | - | 允许跨域的来源，逗号分隔；同源部署留空 |
@@ -159,7 +159,7 @@ docker compose logs -f
 ```bash
 pnpm install
 
-# 终端 1：后端（默认 3033，读取根目录 .env）
+# 终端 1：后端（默认 3001，读取根目录 .env）
 pnpm dev:server
 
 # 终端 2：前端（默认 5173，/api 自动代理到后端）

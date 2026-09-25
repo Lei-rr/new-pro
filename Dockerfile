@@ -25,7 +25,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 
 ENV NODE_ENV=production \
-    PORT=3033 \
+    PORT=3001 \
     HOST=0.0.0.0 \
     TZ=Asia/Shanghai
 
@@ -46,10 +46,10 @@ COPY --from=builder /app/VERSION ./VERSION
 
 USER node
 
-EXPOSE 3033
+EXPOSE 3001
 
 # 存活探针只反映进程状态，避免数据库抖动触发无谓重启
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3033)+'/api/system/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+  CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3001)+'/api/system/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
 CMD ["node", "dist/server.js"]

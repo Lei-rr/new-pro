@@ -123,7 +123,7 @@ function buildConfig(): AppConfig {
   return {
     env,
     host: readString('HOST', '0.0.0.0'),
-    port: readInt('PORT', 3033, 1, 65535),
+    port: readInt('PORT', 3001, 1, 65535),
     pgDsn: readString('DATABASE_URL', readString('PG_DSN', '')),
     dbPoolMax: readInt('DB_POOL_MAX', 20, 1, 200),
     dbStatementTimeoutMs: readInt('DB_STATEMENT_TIMEOUT_MS', 15000, 1000, 300000),
