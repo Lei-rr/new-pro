@@ -123,6 +123,7 @@ function togglePause(): void {
           <TableRow class="hover:bg-transparent">
             <TableHead class="text-xs">时间</TableHead>
             <TableHead class="text-xs">渠道</TableHead>
+            <TableHead class="text-xs">用户</TableHead>
             <TableHead class="text-xs">令牌</TableHead>
             <TableHead class="text-xs">模型</TableHead>
             <TableHead class="text-xs">IP</TableHead>
@@ -140,6 +141,9 @@ function togglePause(): void {
             </TableCell>
             <TableCell class="text-xs">
               <div class="truncate max-w-[130px]" :title="log.channelName">{{ log.channelName }}</div>
+            </TableCell>
+            <TableCell class="text-xs">
+              <div class="truncate max-w-[110px]" :title="log.username">{{ log.username || '-' }}</div>
             </TableCell>
             <TableCell class="text-xs">
               <div class="truncate max-w-[90px] text-muted-foreground" :title="log.tokenName">
@@ -208,7 +212,7 @@ function togglePause(): void {
             </TableCell>
           </TableRow>
           <TableRow v-if="!displayLogs.length">
-            <TableCell colspan="10" class="text-center py-6 text-xs text-muted-foreground">暂无请求流水</TableCell>
+            <TableCell colspan="11" class="text-center py-6 text-xs text-muted-foreground">暂无请求流水</TableCell>
           </TableRow>
         </TableBody>
       </Table>
