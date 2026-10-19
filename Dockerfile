@@ -35,10 +35,14 @@ RUN apk add --no-cache tzdata ca-certificates && \
 
 RUN corepack enable
 
-# 仅安装运行时依赖
+# 仅安装根包（后端）的运行时依赖。
+# web 是 workspace 成员，其 dependencies 全是浏览器端包（echarts / vue / reka-ui 等），
+# 已被 vite 打进 web/dist，服务端运行时不需要，必须用 --filter 排除，
+# 否则 pnpm 会在 workspace 根把它们一并装进镜像（实测多占 149MB）。
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY web/package.json ./web/
-RUN pnpm install --prod --frozen-lockfile --ignore-scripts && pnpm store prune
+RUN pnpm install --prod --filter new-pro --frozen-lockfile --ignore-scripts && \
+    rm -rf /root/.local/share/pnpm /root/.cache/node/corepack
 
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/web/dist ./web/dist
